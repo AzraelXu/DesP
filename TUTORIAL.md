@@ -52,45 +52,58 @@ MD 约 18–24 h / 300 ns；analysis 数分钟；MM-GBSA 取决于帧数，通�
 ## 2. 首次使用
 
 ```bash
-# 创建默认工作区 $HOME/desmond_md_work
+# 在你想放 projects/ 的目录运行（默认工作区就是当前目录）
+cd /home/user1/Documents/PSMA_PDC/PDC
 /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
+
+init 会创建 `projects/ systems/ results/ .gpu_locks/`，写入
+`.desmond_work_root` 标记，并在 `~/.bashrc` 的托管块中写入：
+
+```bash
+if [[ -z "${SCH_WORK_ROOT:-}" ]]; then
+  export SCH_WORK_ROOT='/home/user1/Documents/PSMA_PDC/PDC'
+fi
+alias desmond-init='/opt/desmond_md_pipeline/scripts/init_user.sh'
+# ... desmond-check/smoke/submit/batch/status/results
+```
+
+当前 shell 执行 `source ~/.bashrc` 后即可使用 `desmond-status` 等快捷命令；
+如果当前 shell 已经有旧的 `SCH_WORK_ROOT`，用
+`unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 shell 有效；
+`ssh host desmond-status` 或脚本里请用绝对路径或显式 export。
 
 自定义位置：
 
 ```bash
-SCH_WORK_ROOT=/path/to/my_desmond_work \
-  /opt/desmond_md_pipeline/scripts/init_user.sh
+/opt/desmond_md_pipeline/scripts/init_user.sh --work-root /path/to/my_work
+# 或
+SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
-
-想在当前终端目录初始化：
-
-```bash
-SCH_WORK_ROOT="$PWD" /opt/desmond_md_pipeline/scripts/init_user.sh
-```
-
-必须是绝对路径。`$PWD` 是 bash 内置的绝对当前目录；`$pwd`（小写）不是 bash
-变量，会展开为空并回退到默认工作区。传入相对路径时，脚本会把它解析到
-`$HOME` 下，而不是当前目录。
 
 `SCH_WORK_ROOT` 判定规则（从高到低）：
 
 1. 显式设置的 `SCH_WORK_ROOT` 或 `PIPELINE_WORK_ROOT`；
-2. 代码目录属于当前用户且可写时，使用代码目录；
-3. 否则（只读共享安装）默认 `$HOME/desmond_md_work`。
+2. 从当前目录向上查找最近的 `.desmond_work_root` 标记；
+3. 否则 `$HOME/desmond_md_work`。
 
 注意：
 
-- `SCH_WORK_ROOT=... 命令` 只对该条命令生效，不会留在当前 shell。要在同一终端的
-  后续命令中生效，先执行一次 `export SCH_WORK_ROOT=/absolute/path`；只赋值不加
-  `export` 时，子脚本看不到该变量。新终端要重新 export。
-- `SCH_WORK_ROOT` 必须在登录节点和计算节点都可访问，且不能包含空格、引号、
-  `$`、反引号或反斜杠。
+- init 的默认值是运行命令时的当前目录；只有该目录不可写（或路径含空格、
+  引号、`$`、反引号、反斜杠）时才回退 `$HOME/desmond_md_work`。
+- 在源码树、`$HOME`、`/`、`/tmp` 或已有工作区的子目录里 init，默认会被拒绝；
+  确认无误时加 `--force`。
+- 重新 init 到不同目录时，`~/.bashrc` 托管块会被替换；旧项目不移动，仍在旧
+  工作区。改变已有托管块指向的 root 需要 `--force`；`--work-root` 只指定
+  路径，不绕过这项确认。
+- `SCH_WORK_ROOT` 必须在登录节点和计算节点都可访问；冻结配置里保存的是绝对路径。
 - 不要以 `root` 身份运行普通用户作业。
 
-从旧版本升级：`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`。新提交不再读取环境里的
-`WORK_ROOT`，以免和其他软件冲突；`PIPELINE_WORK_ROOT` 仍作为兼容别名；旧项目
-`project.resolved.conf` 里的 `WORK_ROOT` 会在阶段运行时自动迁移，无需手工修改。
+从旧版本升级：在旧工作区里重新运行一次 `init_user.sh` 补上
+`.desmond_work_root`（项目和输出不动）；也可以继续显式
+`export SCH_WORK_ROOT=<旧路径>`。`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`；
+`PIPELINE_WORK_ROOT` 仍作为兼容别名；旧项目 `project.resolved.conf` 里的
+`WORK_ROOT` 会在阶段运行时自动迁移。
 
 工作区结构：
 
@@ -303,12 +316,28 @@ qsub -W depend=afterok:<md_id>   <PROJECT_DIR>/pbs/mmgbsa.<run>.pbs
 
 ```bash
 /opt/desmond_md_pipeline/scripts/status.sh my_sys
+
+# 需要完整队列/节点信息时再手动用 qstat/pbsnodes
 qstat -u "$USER"
-qstat -f <jobid> | grep -E 'job_state|exec_host|comment'
+qstat -f -1 <jobid> | grep -E 'job_state|resources_used|comment'
 ```
 
-`status.sh` 显示队列、节点 GPU 表、已完成阶段、最近 job id、MD 进度和
-MM-GBSA 均值。参数也可以是项目目录绝对路径。
+`status.sh` 只显示项目级信息：当前阶段、已运行时间、可估算的 ETA（MD 用
+chemical time + ns/day），以及当前 run 的 WARN/FATAL。它不再打印完整队列和
+节点/GPU 表。参数也可以是项目目录绝对路径。
+
+示例（MD 运行中）：
+
+```
+Project : my_sys
+Run     : 20261116_152012_46171 (submitted 2026-11-16 15:20)
+Step    : md (4/6) -- running (PBS 995), elapsed 2h 14m
+Progress: 432.0 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)
+ETA     : ~1d 04h; PBS walltime left 3d 21h
+Warnings: 1 in this run
+  [WARN] ...
+Errors  : none
+```
 
 日志：
 

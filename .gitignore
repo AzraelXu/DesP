@@ -2,6 +2,7 @@
 projects/
 results/
 .gpu_locks/
+.desmond_work_root
 *.bak.*
 *.log
 *.cms

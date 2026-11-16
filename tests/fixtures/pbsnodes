@@ -1,0 +1,4 @@
+#!/bin/bash
+# Tripwire: status.sh must not call pbsnodes anymore.
+printf 'mock pbsnodes: status.sh must not call pbsnodes\n' >&2
+exit 99

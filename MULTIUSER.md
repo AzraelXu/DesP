@@ -1,10 +1,11 @@
 # 多用户共享安装用户指南
 
 本流水线安装在只读共享目录 `/opt/desmond_md_pipeline`：所有用户运行同一份
-代码，各自使用独立 `SCH_WORK_ROOT`（默认 `$HOME/desmond_md_work`），
-`projects/`、`results/`、`systems/`、`.gpu_locks/` 都在自己目录下。
-`/opt/schrodinger2021-2` 及其 license 共享；每个用户用自己的账号提交 PBS
-作业，GPU 由 PBS 分配。
+代码，各自使用独立 `SCH_WORK_ROOT`。默认值是运行 `init_user.sh` 时的当前
+目录（记录在该目录的 `.desmond_work_root` 中）；该目录不可写时回退
+`$HOME/desmond_md_work`。`projects/`、`results/`、`systems/`、`.gpu_locks/`
+都在自己目录下。`/opt/schrodinger2021-2` 及其 license 共享；每个用户用自己的
+账号提交 PBS 作业，GPU 由 PBS 分配。
 
 详细参数和结果解读见 **[TUTORIAL.md](TUTORIAL.md)**；部署、升级、排错见
 **[README.md](README.md)**。
@@ -14,42 +15,46 @@
 ## 1. 首次使用
 
 ```bash
-# 创建默认工作区 $HOME/desmond_md_work
+# 在你想放 projects/ 的目录运行（默认工作区就是当前目录）
+cd /home/user1/Documents/PSMA_PDC/PDC
 /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
+
+init 会创建工作区结构、写入 `.desmond_work_root`，并在 `~/.bashrc` 托管块中
+`export SCH_WORK_ROOT` 并配置 `desmond-init`、`desmond-check`、`desmond-smoke`、
+`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results`。
+当前 shell 执行 `source ~/.bashrc`；如果已有旧值，用
+`unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 shell 有效。
 
 自定义位置：
 
 ```bash
-SCH_WORK_ROOT=/path/to/my_desmond_work \
-  /opt/desmond_md_pipeline/scripts/init_user.sh
+/opt/desmond_md_pipeline/scripts/init_user.sh --work-root /path/to/my_work
+# 或
+SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
-
-想在当前终端目录初始化：
-
-```bash
-SCH_WORK_ROOT="$PWD" /opt/desmond_md_pipeline/scripts/init_user.sh
-```
-
-必须是绝对路径。`$PWD` 是 bash 内置的绝对当前目录；`$pwd`（小写）不是 bash
-变量，会展开为空并回退到默认工作区。传入相对路径时，脚本会把它解析到
-`$HOME` 下，而不是当前目录。
 
 `SCH_WORK_ROOT` 判定规则（从高到低）：
 
 1. 显式设置的 `SCH_WORK_ROOT` 或 `PIPELINE_WORK_ROOT`；
-2. 代码目录属于当前用户且可写时，使用代码目录；
-3. 否则默认 `$HOME/desmond_md_work`。
+2. 从当前目录向上查找最近的 `.desmond_work_root` 标记；
+3. 否则 `$HOME/desmond_md_work`。
 
-注意：`SCH_WORK_ROOT=... 命令` 只对该条命令生效，不会留在当前 shell。要在同一终端
-的后续命令中生效，先执行一次 `export SCH_WORK_ROOT=/absolute/path`；只赋值不加
-`export` 时，子脚本看不到该变量。新终端要重新 export。
-`SCH_WORK_ROOT` 必须在登录节点和计算节点都可访问，且不能包含空格、引号、`$`、
-反引号或反斜杠；不要以 `root` 身份运行普通用户作业。
+注意：
 
-从旧版本升级：`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`。新提交不再读取环境里的
-`WORK_ROOT`，以免和其他软件冲突；`PIPELINE_WORK_ROOT` 仍作为兼容别名；旧项目
-`project.resolved.conf` 里的 `WORK_ROOT` 会在阶段运行时自动迁移，无需手工修改。
+- init 的默认值是运行命令时的当前目录；只有该目录不可写（或路径含空格、
+  引号、`$`、反引号、反斜杠）时才回退 `$HOME/desmond_md_work`。
+- 在源码树、`$HOME`、`/`、`/tmp` 或已有工作区的子目录里 init，默认会被拒绝；
+  确认无误时加 `--force`。
+- 重新 init 到不同目录时，`~/.bashrc` 托管块会被替换；旧项目不移动。改变
+  已有托管块指向的 root 需要 `--force`。
+- `SCH_WORK_ROOT` 必须在登录节点和计算节点都可访问；不要以 `root` 身份运行
+  普通用户作业。
+
+从旧版本升级：在旧工作区里重新运行一次 `init_user.sh` 补上
+`.desmond_work_root`；也可以继续显式 `export SCH_WORK_ROOT=<旧路径>`。
+`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`；`PIPELINE_WORK_ROOT` 仍作为兼容别名；
+旧项目 `project.resolved.conf` 里的 `WORK_ROOT` 会在阶段运行时自动迁移。
 
 ---
 
@@ -125,6 +130,9 @@ ASL 选中 0 个原子时 `--check` 会非零退出。配体通常用独立链�
 /opt/desmond_md_pipeline/scripts/status.sh my_sys
 /opt/desmond_md_pipeline/scripts/collect_results.sh
 ```
+
+`status.sh` 显示当前阶段、elapsed/ETA 和当前 run 的 WARN/FATAL，不再打印完整
+队列和节点/GPU 表；需要时手动运行 `qstat -u "$USER"`。
 
 提交必须在**登录节点**执行；脚本检测到 `PBS_JOBID` 会拒绝。smoke 输出在
 `$SCH_WORK_ROOT/projects/_smoke/`。

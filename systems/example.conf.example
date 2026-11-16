@@ -4,8 +4,10 @@
 # All paths may be absolute, or relative to this config file's directory.
 # SYSTEM_NAME must contain only [A-Za-z0-9_.-] and is used in output paths
 # and short PBS job names.
-# PROJECT_DIR defaults to $SCH_WORK_ROOT/projects/<SYSTEM_NAME>; for the shared
-# read-only install, SCH_WORK_ROOT defaults to $HOME/desmond_md_work.
+# PROJECT_DIR defaults to $SCH_WORK_ROOT/projects/<SYSTEM_NAME>.
+# SCH_WORK_ROOT is the directory where you ran init_user.sh (recorded in
+# .desmond_work_root and ~/.bashrc), or $HOME/desmond_md_work if that
+# directory is not writable.
 # =============================================================================
 
 SYSTEM_NAME="example"
@@ -48,5 +50,7 @@ LIGAND_ASL="chain B"
 # RUN_ANALYSIS=yes
 # RUN_MMGBSA=yes
 
-# Optional output directory. Default: <pipeline>/projects/<SYSTEM_NAME>.
+# Optional output directory. Default:
+#   $SCH_WORK_ROOT/projects/<SYSTEM_NAME>
+# where SCH_WORK_ROOT is the directory where you ran init_user.sh.
 # PROJECT_DIR="/absolute/path/to/output"

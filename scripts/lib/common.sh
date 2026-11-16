@@ -316,6 +316,7 @@ mark_done() {
         printf 'STAGE=%s\n' "$stage"
         printf 'STATUS=done\n'
         printf 'JOBID=%s\n' "${PBS_JOBID:-manual}"
+        printf 'RUN_ID=%s\n' "${RUN_ID:-manual}"
         printf 'START=%s\n' "${STAGE_START:-}"
         printf 'END=%s\n' "$(_timestamp)"
         printf 'OUTPUT=%s\n' "$output"
@@ -496,6 +497,17 @@ md_log_value() {
             return 1
             ;;
     esac
+}
+
+# Average of the last N "ns/day" values in a Desmond engine log.
+# Prints nothing when the log has no rate lines.
+md_log_rate_avg() {
+    local log="$1"
+    local n="${2:-10}"
+    [[ -f "$log" ]] || return 1
+    sed -n 's/.*ns\/day:[[:space:]]*\([0-9.][0-9.]*\).*/\1/p' "$log" \
+        | tail -n "$n" \
+        | awk 'NF { sum += $1; count++ } END { if (count > 0) printf "%.1f", sum / count }'
 }
 
 check_gpu_log() {

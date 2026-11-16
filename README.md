@@ -78,6 +78,11 @@ sudo rsync -a --delete \
   <source-dir>/ /opt/desmond_md_pipeline/
 ```
 
+注意：PBS 作业在运行时会从 `PIPELINE_ROOT` 读取阶段脚本和 `scripts/lib/*.sh`。
+如果队列里还有 `Q/R/H` 作业，升级会改变在途作业的代码行为（冻结的
+`project.resolved.conf` 只固定科学参数）。部署前先确认 `qstat -u "$USER"`
+没有在途作业，或明确接受在途作业使用新版脚本。
+
 推荐使用“版本目录 + 软链接”，便于回滚：
 
 ```bash
@@ -132,8 +137,20 @@ sudo rsync -a --delete \
 `SCH_WORK_ROOT` 判定：
 
 1. 显式 `SCH_WORK_ROOT` 或 `PIPELINE_WORK_ROOT`；
-2. 代码目录属于当前用户且可写时，使用代码目录（单用户副本场景）；
-3. 否则使用 `$HOME/desmond_md_work`（只读共享安装的默认）。
+2. 从当前目录逐级向上查找最近的 `.desmond_work_root` 标记；标记所在目录就是
+   工作区（`init_user.sh` 在运行目录创建该标记）；
+3. 否则使用 `$HOME/desmond_md_work`。
+
+`init_user.sh` 的默认工作区是**运行命令时的当前目录**；只有该目录不可写（或
+路径含空格等不支持字符）时才回退到 `$HOME/desmond_md_work`。`--force` 用于
+显式允许在源码树、`$HOME`、`/`、`/tmp` 等位置初始化，或替换 `~/.bashrc` 中
+指向其他 root 的托管块。init 还会在 `~/.bashrc` 写入托管块，导出
+`SCH_WORK_ROOT` 并配置 `desmond-init`、`desmond-check`、`desmond-smoke`、
+`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results` 别名。
+
+从旧版本升级：在旧工作区里重新运行一次 `init_user.sh` 即可补上
+`.desmond_work_root` 标记（项目和输出不动）；也可以继续显式
+`export SCH_WORK_ROOT=<旧路径>`。
 
 命名迁移：`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`。新提交不再读取环境变量
 `WORK_ROOT`（避免与其他软件冲突）；`PIPELINE_WORK_ROOT` 保留为弃用别名。
@@ -291,15 +308,15 @@ PBS 可通过 `PBS_GPUFILE` 和/或 `CUDA_VISIBLE_DEVICES` 告知作业分配到
 ├── examples/                    pilot 配置示例
 ├── pbs/*.pbs.in                 PBS 模板（提交时渲染）
 ├── scripts/
-│   ├── lib/                     配置、日志、MSJ/CFG、GPU 选择
+│   ├── lib/                     配置、日志、MSJ/CFG、GPU 选择、status 解析/输出
 │   ├── stages/                  10_prepwizard ... 60_mmgbsa
 │   ├── submit_system.sh         单体系：渲染 + qsub 依赖链
 │   ├── submit_batch.sh          多体系批量提交
 │   ├── submit_smoke.sh          GPU/license/环境冒烟
 │   ├── check_env.sh             登录节点环境检查
-│   ├── status.sh                qstat + 阶段/MD 进度 + MM-GBSA 汇总
+│   ├── status.sh                当前阶段 / ETA / 本 run WARN-FATAL
 │   ├── collect_results.sh       汇总 RMSD 图与 MM-GBSA 表
-│   ├── init_user.sh             初始化用户工作区
+│   ├── init_user.sh             初始化工作区 + ~/.bashrc 快捷命令
 │   └── inspect_structure.py     链/HET/水/离子 + ASL 原子数校验
 └── tools/
     ├── validate_cms.py          CMS 完整性检查
@@ -626,7 +643,9 @@ $SCHRODINGER/run thermal_mmgbsa.py <md-out.cms> \
 ## 9. 多用户模型与权限
 
 - 代码只读共享，所有用户运行同一份脚本；
-- 每个用户独立 `SCH_WORK_ROOT`；默认 `$HOME/desmond_md_work`；
+- 每个用户独立 `SCH_WORK_ROOT`；默认是运行 `init_user.sh` 的目录（记录在
+  `.desmond_work_root`），不可写时回退 `$HOME/desmond_md_work`；`~/.bashrc`
+  托管块导出该路径并配置 `desmond-*` 别名；
 - `project.resolved.conf` 冻结提交时的参数，升级代码不会改变已提交项目的
   科学参数；
 - 每个用户用自己的账号提交 PBS 作业，作业和输出归该用户；
@@ -734,6 +753,8 @@ walltime；`--force md` 会归档旧结果并从头重跑。
 - [ ] `/opt/schrodinger2021-2/version.txt` 为 2021-2（Build 117 最好）
 - [ ] `licutil -list` 有 `DESMOND_MAIN`、`DESMOND_GPGPU`、`PRIMEX_MAIN`
 - [ ] `qsub/qstat/qdel/pbsnodes` 在 PATH；队列名与 `config.sh` 一致
+- [ ] 部署/升级前确认队列为空（`qstat -u "$USER"` 无 Q/R/H），或接受在途
+      作业使用新版脚本
 - [ ] `qstat -Q -f` 确认 walltime 限制，调整 `PBS_WALLTIME_*`
 - [ ] `pbsnodes -a` 的 `gpus` 数与节点实际 `nvidia-smi -L` 一致
 - [ ] `check_env.sh` 无 FAIL

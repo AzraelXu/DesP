@@ -9,8 +9,10 @@
 # Values here can be overridden by:
 #   1. environment variables (because of ${VAR:-default})
 #   2. systems/<name>.conf
-# SCH_WORK_ROOT defaults to this directory when it is owned/writable by you;
-# for a shared read-only install it defaults to $HOME/desmond_md_work.
+# SCH_WORK_ROOT resolves from, in order: an explicit environment value, the
+# nearest .desmond_work_root marker at or above the current directory, and
+# finally $HOME/desmond_md_work. init_user.sh creates the marker in the
+# directory where it is run.
 # PIPELINE_WORK_ROOT is kept as a deprecated alias.
 # WORK_ROOT is intentionally NOT read from the environment: it commonly
 # collides with unrelated software. Old project.resolved.conf files that set
@@ -20,6 +22,32 @@
 # =============================================================================
 
 # ---------------- Work root (multi-user) ----------------
+# Precedence:
+#   1. explicit SCH_WORK_ROOT (or deprecated PIPELINE_WORK_ROOT);
+#   2. nearest .desmond_work_root marker at or above the current directory;
+#   3. $HOME/desmond_md_work.
+# init_user.sh writes the marker in the directory where it is run, so commands
+# started from inside a work root resolve the same root from any subdirectory.
+_sch_find_work_root() {
+    local d marker_root
+    d="$(pwd -P 2>/dev/null || true)"
+    [[ -n "$d" ]] || d="${PWD:-}"
+    [[ -n "$d" && -d "$d" ]] || return 1
+    while :; do
+        if [[ -f "$d/.desmond_work_root" ]]; then
+            marker_root="$(sed -n 's/^SCH_WORK_ROOT=//p' "$d/.desmond_work_root" 2>/dev/null | head -1)"
+            if [[ -n "$marker_root" && "$marker_root" != "$d" ]]; then
+                echo "WARNING: $d/.desmond_work_root names $marker_root; using $d" >&2
+            fi
+            printf '%s' "$d"
+            return 0
+        fi
+        [[ "$d" == "/" ]] && break
+        d="$(dirname "$d")"
+    done
+    return 1
+}
+
 if [[ -n "${SCH_WORK_ROOT:-}" && -n "${PIPELINE_WORK_ROOT:-}" \
       && "$SCH_WORK_ROOT" != "$PIPELINE_WORK_ROOT" ]]; then
     echo "WARNING: SCH_WORK_ROOT and PIPELINE_WORK_ROOT differ; using SCH_WORK_ROOT" >&2
@@ -32,8 +60,8 @@ if [[ -n "${WORK_ROOT:-}" && -z "${SCH_WORK_ROOT:-}" ]]; then
     echo "WARNING: WORK_ROOT is ignored for new submissions; use SCH_WORK_ROOT" >&2
 fi
 if [[ -z "${SCH_WORK_ROOT:-}" ]]; then
-    if [[ -n "${PIPELINE_ROOT:-}" && -O "${PIPELINE_ROOT}" && -w "${PIPELINE_ROOT}" ]]; then
-        SCH_WORK_ROOT="$PIPELINE_ROOT"
+    if SCH_WORK_ROOT="$(_sch_find_work_root)"; then
+        :
     else
         SCH_WORK_ROOT="${HOME}/desmond_md_work"
     fi

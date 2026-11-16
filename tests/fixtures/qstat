@@ -1,0 +1,17 @@
+#!/bin/bash
+# Mock qstat for tests. Only the invocation status.sh is allowed to use:
+#   qstat -f -1 <job_id>
+# Any other form exits 99 so a regression (e.g. qstat -u) fails the test.
+if [[ "${1:-}" != "-f" || "${2:-}" != "-1" || $# -ne 3 ]]; then
+    printf 'mock qstat: unsupported invocation: %s\n' "$*" >&2
+    exit 99
+fi
+id="$3"
+printf '%s\n' "$*" >> "${QSTAT_LOG:-/dev/null}"
+fixture="${QSTAT_FIXTURE_DIR:-}/$id"
+if [[ -f "$fixture" ]]; then
+    cat "$fixture"
+    exit 0
+fi
+printf 'qstat: Unknown Job Id Error %s.cluster\n' "$id" >&2
+exit 153

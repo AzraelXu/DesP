@@ -1,5 +1,7 @@
 #!/bin/bash
-# Show PBS queue, GPU nodes, and per-project stage/MD/MM-GBSA status.
+# Project-centric status: current stage, ETA, and warnings/errors from the
+# current run. This intentionally does not print the full PBS queue or
+# node/GPU tables; use qstat/pbsnodes for that.
 # Usage: status.sh [SYSTEM_NAME | PROJECT_DIR]
 set -uo pipefail
 
@@ -8,118 +10,135 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/scripts/lib/common.sh"
 source "${PIPELINE_ROOT}/config.sh"
+export LC_ALL=C
 
-username="${USER:-$(id -un)}"
+STATUS_NOW="${STATUS_NOW:-$(date +%s)}"
+[[ "$STATUS_NOW" =~ ^[0-9]+$ ]] || STATUS_NOW="$(date +%s)"
 
-echo "============================================================"
-echo "PBS queue for ${username}"
-echo "============================================================"
-if command -v "$QSTAT" >/dev/null 2>&1; then
-    "$QSTAT" -u "$username" 2>&1 || true
-else
-    echo "qstat not found: ${QSTAT}"
-fi
-echo
+STATUS_STAGES=(prepwizard setup min md analysis mmgbsa)
+declare -A STAGE_PREFIX=(
+    [prepwizard]=10_prepwizard [setup]=20_setup [min]=30_min [md]=40_md
+    [analysis]=50_analysis [mmgbsa]=60_mmgbsa
+)
+declare -A STAGE_PBS=(
+    [prepwizard]=prep [setup]=prep [min]=min [md]=md
+    [analysis]=analysis [mmgbsa]=mmgbsa
+)
+declare -A STAGE_WALLVAR=(
+    [prepwizard]=PBS_WALLTIME_PREP [setup]=PBS_WALLTIME_PREP
+    [min]=PBS_WALLTIME_MIN [md]=PBS_WALLTIME_MD
+    [analysis]=PBS_WALLTIME_ANALYSIS [mmgbsa]=PBS_WALLTIME_MMGBSA
+)
 
-echo "============================================================"
-echo "Nodes and GPUs"
-echo "============================================================"
-if command -v "$PBSNODES" >/dev/null 2>&1; then
-    printf '%-10s %-10s %-6s %-6s\n' "node" "state" "np" "gpus"
-    "$PBSNODES" -a 2>/dev/null | awk '
-        /^[A-Za-z]/ {
-            if (node != "") printf "%-10s %-10s %-6s %-6s\n", node, state, np, gpus
-            node = $1; state = "-"; np = "-"; gpus = "0"; next
-        }
-        /state =/ { state = $3 }
-        /np =/    { np = $3 }
-        /gpus =/  { gpus = $3 }
-        END { if (node != "") printf "%-10s %-10s %-6s %-6s\n", node, state, np, gpus }
-    '
-else
-    echo "pbsnodes not found: ${PBSNODES}"
-fi
-echo
+# Per-project state.
+declare -A STAGE_STATE=() STAGE_INDEX=()
+declare -A STAGE_QSTATE=() STAGE_QSTART=() STAGE_QUSED=() STAGE_QLIMIT=()
+declare -A STAGE_QEXIT=() STAGE_QCOMMENT=() STAGE_QHOLD=() STAGE_QEST=()
+declare -A STAGE_SLOG=()
+PROJECTS=()
+declare -A PROJECT_SEEN=()
+PROJECT_RESULT=""
+CURRENT_STAGES=()
+STAGE_TOTAL=0
 
-projects=()
-if (( $# > 0 )); then
-    if [[ -d "$1" ]]; then
-        projects=("$1")
-    else
-        projects=("${SCH_WORK_ROOT}/projects/$1")
+# Frozen configuration fields.
+F_SYSTEM_NAME=""
+F_MD_TIME_NS=""
+F_MD_TIME_PS=""
+F_RUN_ANALYSIS=""
+F_RUN_MMGBSA=""
+F_FORCE_STAGES=""
+F_PBS_WALLTIME_PREP=""
+F_PBS_WALLTIME_MIN=""
+F_PBS_WALLTIME_MD=""
+F_PBS_WALLTIME_ANALYSIS=""
+F_PBS_WALLTIME_MMGBSA=""
+
+# jobs.env fields.
+J_HAS_JOBS="no"
+J_RUN_ID=""
+J_SUBMITTED_AT=""
+J_PREP=""
+J_MIN=""
+J_MD=""
+J_ANALYSIS=""
+J_MMGBSA=""
+
+# qstat cache.
+declare -A Q_QUERIED=() Q_CACHE_STATE=() Q_CACHE_USED=() Q_CACHE_LIMIT=()
+declare -A Q_CACHE_START=() Q_CACHE_EXIT=() Q_CACHE_COMMENT=()
+declare -A Q_CACHE_HOLD=() Q_CACHE_EST=() Q_CACHE_ERR=()
+CUR_STATE=""
+CUR_USED=""
+CUR_LIMIT=""
+CUR_START=""
+CUR_EXIT=""
+CUR_COMMENT=""
+CUR_HOLD=""
+CUR_EST=""
+CUR_ERR=""
+PBS_ERROR_PRINTED="no"
+
+# MD progress.
+MD_CHEM=""
+MD_RATE=""
+MD_RATE_SRC=""
+MD_PCT=""
+MD_ETA=""
+
+
+source "${PIPELINE_ROOT}/scripts/lib/status_state.sh"
+source "${PIPELINE_ROOT}/scripts/lib/status_report.sh"
+
+status_usage() {
+    cat <<'EOF'
+Usage: status.sh [SYSTEM_NAME | PROJECT_DIR]
+
+For each initialized project, show:
+  - the current stage and its PBS state,
+  - elapsed time and ETA (MD uses chemical time + ns/day),
+  - warnings/errors recorded in the current run.
+
+The full PBS queue and node/GPU tables are deliberately omitted; use qstat
+or pbsnodes if you need them.
+EOF
+}
+
+main() {
+    local arg="${1:-}"
+    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+        status_usage
+        exit 0
     fi
-else
-    shopt -s nullglob
-    for d in "${SCH_WORK_ROOT}/projects"/*; do
-        if [[ -d "$d" && -f "$d/project.resolved.conf" ]]; then
-            projects+=("$d")
+    if (( $# > 1 )); then
+        status_usage
+        printf 'Only one project argument is allowed.\n' >&2
+        exit 2
+    fi
+
+    if ! command -v "$QSTAT" >/dev/null 2>&1; then
+        printf 'Note: qstat not found (QSTAT=%s); showing file-based status only.\n' "$QSTAT"
+        echo
+    fi
+
+    collect_projects "$arg"
+    if (( ${#PROJECTS[@]} == 0 )); then
+        if [[ -n "$arg" ]]; then
+            printf 'Project not found: %s\n' "$arg" >&2
+            printf 'Work root: %s\n' "$SCH_WORK_ROOT" >&2
+            exit 1
         fi
+        printf 'No initialized projects under %s/projects\n' "$SCH_WORK_ROOT"
+        printf 'Run init_user.sh in your work directory, or export SCH_WORK_ROOT=<root> and retry.\n'
+        exit 0
+    fi
+    mapfile -t PROJECTS < <(printf '%s\n' "${PROJECTS[@]}" | LC_ALL=C sort)
+
+    local i
+    for ((i = 0; i < ${#PROJECTS[@]}; i++)); do
+        (( i > 0 )) && echo
+        print_project "${PROJECTS[$i]}"
     done
-    shopt -u nullglob
-fi
+}
 
-if (( ${#projects[@]} == 0 )); then
-    echo "No initialized projects under ${SCH_WORK_ROOT}/projects"
-    exit 0
-fi
-
-for pdir in "${projects[@]}"; do
-    [[ -f "$pdir/project.resolved.conf" ]] || continue
-    name="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${SYSTEM_NAME:-}"' _ "$pdir/project.resolved.conf" 2>/dev/null || true)"
-    [[ -n "$name" ]] || name="$(basename "$pdir")"
-    target="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${MD_TIME_PS:-}"' _ "$pdir/project.resolved.conf" 2>/dev/null || true)"
-
-    echo "============================================================"
-    echo "Project: ${name}"
-    echo "Dir    : ${pdir}"
-    echo "============================================================"
-
-    done_list=()
-    for s in prepwizard setup min md analysis mmgbsa; do
-        if [[ -f "$pdir/state/${s}.done" ]]; then
-            done_list+=("$s")
-        fi
-    done
-    if (( ${#done_list[@]} == 0 )); then
-        echo "Completed stages: none"
-    else
-        echo "Completed stages: ${done_list[*]}"
-    fi
-
-    if [[ -f "$pdir/state/jobs.env" ]]; then
-        run_id="$(sed -n 's/^RUN_ID=//p' "$pdir/state/jobs.env" | head -1)"
-        echo "Latest run      : ${run_id:-unknown}"
-        for key in PREP_JOB MIN_JOB MD_JOB ANALYSIS_JOB MMGBSA_JOB; do
-            id="$(sed -n "s/^${key}=//p" "$pdir/state/jobs.env" | head -1)"
-            [[ -n "$id" ]] || continue
-            state="$("$QSTAT" -f "$id" 2>/dev/null \
-                | sed -n 's/^[[:space:]]*job_state = //p' | head -1 || true)"
-            printf '  %-12s %-14s %s\n' "$key" "$id" "${state:--}"
-        done
-    else
-        echo "Latest run      : not submitted yet"
-    fi
-
-    md_log="$pdir/desmond_md_job_${name}/desmond_md_job_${name}.log"
-    if [[ -f "$md_log" ]]; then
-        chem="$(md_log_value "$md_log" chemical_ps || true)"
-        rate="$(md_log_value "$md_log" ns_per_day || true)"
-        if [[ -n "$chem" && -n "$target" ]]; then
-            pct="$(awk -v a="$chem" -v b="$target" 'BEGIN {if (b > 0) printf "%.1f", 100 * a / b; else print "?"}')"
-            echo "MD progress     : ${pct}% (${chem} / ${target} ps), last rate ${rate:-?} ns/day"
-        elif [[ -n "$chem" ]]; then
-            echo "MD progress     : ${chem} ps, last rate ${rate:-?} ns/day"
-        fi
-    fi
-
-    if [[ -f "$pdir/results/mmgbsa_summary.md" ]]; then
-        mean_line="$(grep 'Mean dG_bind' "$pdir/results/mmgbsa_summary.md" | head -1 || true)"
-        echo "MM-GBSA         : ${mean_line:-summary present}"
-    fi
-
-    if [[ -d "$pdir/results" ]]; then
-        nfiles="$(find "$pdir/results" -maxdepth 1 -type f ! -name '*.bak.*' 2>/dev/null | wc -l)"
-        echo "Results         : ${nfiles} file(s) in ${pdir}/results"
-    fi
-    echo
-done
+main "$@"
