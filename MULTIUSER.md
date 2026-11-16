@@ -16,7 +16,7 @@
 
 ```bash
 # 在你想放 projects/ 的目录运行（默认工作区就是当前目录）
-cd /home/user1/Documents/PSMA_PDC/PDC
+cd /home/user1/Documents/PSMA_PDC/PDC/test
 /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
 
@@ -25,6 +25,20 @@ init 会创建工作区结构、写入 `.desmond_work_root`，并在 `~/.bashrc`
 `desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results`。
 当前 shell 执行 `source ~/.bashrc`；如果已有旧值，用
 `unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 shell 有效。
+
+init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时间戳>`；
+不需要改 shell 配置时加 `--no-bashrc`，init 会把 export 和 alias 打印出来
+供手工粘贴。
+
+| 快捷命令 | 等价脚本 |
+|---|---|
+| `desmond-init` | `scripts/init_user.sh` |
+| `desmond-check` | `scripts/check_env.sh` |
+| `desmond-smoke` | `scripts/submit_smoke.sh` |
+| `desmond-submit` | `scripts/submit_system.sh` |
+| `desmond-batch` | `scripts/submit_batch.sh` |
+| `desmond-status` | `scripts/status.sh` |
+| `desmond-results` | `scripts/collect_results.sh` |
 
 自定义位置：
 
@@ -39,6 +53,8 @@ SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 1. 显式设置的 `SCH_WORK_ROOT` 或 `PIPELINE_WORK_ROOT`；
 2. 从当前目录向上查找最近的 `.desmond_work_root` 标记；
 3. 否则 `$HOME/desmond_md_work`。
+
+因此从 `projects/<name>/`、`systems/` 等子目录运行命令也会解析到同一工作区。
 
 注意：
 
@@ -55,6 +71,8 @@ SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 `.desmond_work_root`；也可以继续显式 `export SCH_WORK_ROOT=<旧路径>`。
 `WORK_ROOT` 已更名为 `SCH_WORK_ROOT`；`PIPELINE_WORK_ROOT` 仍作为兼容别名；
 旧项目 `project.resolved.conf` 里的 `WORK_ROOT` 会在阶段运行时自动迁移。
+旧 `.done` 没有 `RUN_ID` 也能被 `status.sh` 正确识别（回退比较 `JOBID`），
+不需要手工修改。
 
 ---
 
@@ -134,6 +152,27 @@ ASL 选中 0 个原子时 `--check` 会非零退出。配体通常用独立链�
 `status.sh` 显示当前阶段、elapsed/ETA 和当前 run 的 WARN/FATAL，不再打印完整
 队列和节点/GPU 表；需要时手动运行 `qstat -u "$USER"`。
 
+示例（MD 运行中）：
+
+```
+Project : my_sys
+Run     : 20261116_152012_46171 (submitted 2026-11-16 15:20)
+Step    : md (4/6) -- running (PBS 995), elapsed 2h 14m
+Progress: 432.0 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)
+ETA     : ~1d 04h; PBS walltime left 3d 21h
+Warnings: 1 in this run
+  [WARN] ...
+Errors  : none
+```
+
+- `Warnings`/`Errors` 只统计本次提交（`SUBMITTED_AT`）之后的记录；旧运行的
+  警告需要手动 `grep '^\[WARN\]' logs/pipeline.log`。
+- MD 的引擎日志可能还在 scratch、尚未回传到项目目录；此时 ETA 显示
+  `unknown (engine log not in project dir yet)`，只给 PBS walltime 余量。
+- 失败阶段会显示 `FAILED`、`Blocked : ...` 以及 PBS/阶段日志尾部。
+- 无参数时扫描 `$SCH_WORK_ROOT/projects/` 下所有项目；参数也可以是项目目录
+  绝对路径。
+
 提交必须在**登录节点**执行；脚本检测到 `PBS_JOBID` 会拒绝。smoke 输出在
 `$SCH_WORK_ROOT/projects/_smoke/`。
 
@@ -174,6 +213,29 @@ ASL 选中 0 个原子时 `--check` 会非零退出。配体通常用独立链�
 
 **Q：作业提交后找不到输出？**
 看 `$SCH_WORK_ROOT/projects/<name>/logs/pbs/*.out` 和 `logs/*.log`。
+
+**Q：重新 init 到别的目录后，旧项目去哪了？**
+旧项目仍留在旧工作区，不会移动。可以用
+`/opt/desmond_md_pipeline/scripts/status.sh /旧工作区/projects/<name>` 查看，
+或继续在旧工作区运行命令。新工作区只影响之后的提交。
+
+**Q：`source ~/.bashrc` 后还是旧 root / 别名不生效？**
+如果当前 shell 已经有 `SCH_WORK_ROOT`，托管块不会覆盖它；执行
+`unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 bash 中生效，
+`ssh host desmond-status` 或脚本里请用绝对路径或显式 `export`。
+
+**Q：`status.sh` 为什么没有 ETA？**
+queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS walltime
+余量；MD 的引擎日志如果还在 scratch、没回传到项目目录，也会显示 ETA unknown。
+作业结束后日志回传，再运行 status 即可看到 chemical time 和速率。
+
+**Q：`status.sh` 的警告/错误包含旧运行吗？**
+不包含。它按当前 `jobs.env` 的 `SUBMITTED_AT` 过滤，只显示本次提交之后的
+`WARN`/`FATAL`；需要历史记录时直接查看 `logs/pipeline.log`。
+
+**Q：`status.sh` 不显示节点/GPU 了吗？**
+是的。需要时手动运行 `qstat -u "$USER"`、`pbsnodes -a` 或
+`qstat -f -1 <jobid>`。
 
 **Q：可以多人同时用同一个体系名吗？**
 可以。只要各自的 `SCH_WORK_ROOT` 不同，输出互不冲突；不要共享 `SCH_WORK_ROOT`。

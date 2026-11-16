@@ -53,7 +53,7 @@ MD 约 18–24 h / 300 ns；analysis 数分钟；MM-GBSA 取决于帧数，通�
 
 ```bash
 # 在你想放 projects/ 的目录运行（默认工作区就是当前目录）
-cd /home/user1/Documents/PSMA_PDC/PDC
+cd /home/user1/Documents/PSMA_PDC/PDC/test
 /opt/desmond_md_pipeline/scripts/init_user.sh
 ```
 
@@ -62,11 +62,15 @@ init 会创建 `projects/ systems/ results/ .gpu_locks/`，写入
 
 ```bash
 if [[ -z "${SCH_WORK_ROOT:-}" ]]; then
-  export SCH_WORK_ROOT='/home/user1/Documents/PSMA_PDC/PDC'
+  export SCH_WORK_ROOT='/home/user1/Documents/PSMA_PDC/PDC/test'
 fi
 alias desmond-init='/opt/desmond_md_pipeline/scripts/init_user.sh'
 # ... desmond-check/smoke/submit/batch/status/results
 ```
+
+init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时间戳>`；
+不需要改 shell 配置时加 `--no-bashrc`，init 会把 export 和 alias 打印出来
+供手工粘贴。
 
 当前 shell 执行 `source ~/.bashrc` 后即可使用 `desmond-status` 等快捷命令；
 如果当前 shell 已经有旧的 `SCH_WORK_ROOT`，用
@@ -87,6 +91,8 @@ SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 2. 从当前目录向上查找最近的 `.desmond_work_root` 标记；
 3. 否则 `$HOME/desmond_md_work`。
 
+因此从 `projects/<name>/`、`systems/` 等子目录运行命令也会解析到同一工作区。
+
 注意：
 
 - init 的默认值是运行命令时的当前目录；只有该目录不可写（或路径含空格、
@@ -103,12 +109,14 @@ SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 `.desmond_work_root`（项目和输出不动）；也可以继续显式
 `export SCH_WORK_ROOT=<旧路径>`。`WORK_ROOT` 已更名为 `SCH_WORK_ROOT`；
 `PIPELINE_WORK_ROOT` 仍作为兼容别名；旧项目 `project.resolved.conf` 里的
-`WORK_ROOT` 会在阶段运行时自动迁移。
+`WORK_ROOT` 会在阶段运行时自动迁移。旧 `.done` 没有 `RUN_ID` 也能被
+`status.sh` 正确识别（回退比较 `JOBID`），不需要手工修改。
 
 工作区结构：
 
 ```
 $SCH_WORK_ROOT/
+├── .desmond_work_root  # 工作区标记；config.sh 从这里向上查找
 ├── systems/     # 你自己的 <name>.conf
 ├── projects/    # 每个体系一个项目目录
 ├── results/     # collect_results.sh 的跨体系汇总
@@ -323,8 +331,9 @@ qstat -f -1 <jobid> | grep -E 'job_state|resources_used|comment'
 ```
 
 `status.sh` 只显示项目级信息：当前阶段、已运行时间、可估算的 ETA（MD 用
-chemical time + ns/day），以及当前 run 的 WARN/FATAL。它不再打印完整队列和
-节点/GPU 表。参数也可以是项目目录绝对路径。
+chemical time + 最近 10 个 `ns/day` 的平均值），以及当前 run 的 WARN/FATAL。
+它不再打印完整队列和节点/GPU 表。参数可以是体系名或项目目录绝对路径；不带
+参数时扫描 `$SCH_WORK_ROOT/projects/` 下所有项目。
 
 示例（MD 运行中）：
 
@@ -338,6 +347,38 @@ Warnings: 1 in this run
   [WARN] ...
 Errors  : none
 ```
+
+失败阶段示例：
+
+```
+Step    : min (3/6) -- FAILED (PBS 994), exit_status=1
+Blocked : md analysis mmgbsa
+Errors  : 1 in this run
+  [FATAL] ...
+Last output for min:
+  logs/pbs/min.<run>.out:
+    ...
+```
+
+全部完成：
+
+```
+Step    : complete (6/6), total 57m 42s
+Results : results/mmgbsa_summary.md: | Mean dG_bind | ... |
+Warnings: none
+Errors  : none
+```
+
+说明：
+
+- `analysis` 和 `mmgbsa` 并行；两者都未完成时会各显示一行 `Step`。
+- 上游失败后，下游显示 `Blocked : ...`，不会误判为仍在排队。
+- `Warnings`/`Errors` 只统计本次提交（`SUBMITTED_AT`）之后的记录；历史记录
+  直接看 `logs/pipeline.log`。
+- MD 的引擎日志可能还在 scratch、尚未回传到项目目录；此时 ETA 显示
+  `unknown (engine log not in project dir yet)`，只给 PBS walltime 余量。
+- ETA 超过 PBS walltime 余量时会额外显示
+  `WARNING : ETA exceeds PBS walltime left ...`，提示作业可能在 walltime 处被停止。
 
 日志：
 
@@ -576,6 +617,17 @@ qdel <id>
 cat "$SCH_WORK_ROOT/results/mmgbsa_summary.md"
 ```
 
+如果已经 `source ~/.bashrc`，可以改用快捷命令：
+
+```bash
+desmond-check
+desmond-smoke
+desmond-submit "$SCH_WORK_ROOT/systems/foo.conf" --dry-run
+desmond-submit "$SCH_WORK_ROOT/systems/foo.conf"
+desmond-status foo
+desmond-results
+```
+
 ASL 速查：
 
 ```text
@@ -655,6 +707,29 @@ Desmond 在 scratch 目录写日志，完成才回传。需要实时看就
 
 **Q14：`/opt` 不能写怎么办？**
 流水线不需要写 `/opt`；只有项目目录和 `$HOME/.schrodinger` 会被写。
+
+**Q15：重新 init 到别的目录后，旧项目去哪了？**
+旧项目仍留在旧工作区，不会移动。用
+`/opt/desmond_md_pipeline/scripts/status.sh /旧工作区/projects/<name>` 查看，
+或继续在旧工作区运行命令。新工作区只影响之后的提交。
+
+**Q16：`source ~/.bashrc` 后还是旧 root / 别名不生效？**
+如果当前 shell 已经有 `SCH_WORK_ROOT`，托管块不会覆盖它；执行
+`unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 bash 中生效，
+`ssh host desmond-status` 或脚本里请用绝对路径或显式 `export`。
+
+**Q17：`status.sh` 为什么没有 ETA / 只显示 unknown？**
+queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS walltime
+余量；MD 的引擎日志如果还在 scratch、没回传到项目目录，也会显示 ETA unknown。
+作业结束后日志回传，再运行 status 即可看到 chemical time 和速率。
+
+**Q18：`status.sh` 的警告/错误包含旧运行吗？**
+不包含。它按当前 `jobs.env` 的 `SUBMITTED_AT` 过滤，只显示本次提交之后的
+`WARN`/`FATAL`；需要历史记录时直接查看 `logs/pipeline.log`。
+
+**Q19：`status.sh` 不显示节点/GPU 了吗？**
+是的。需要时手动运行 `qstat -u "$USER"`、`pbsnodes -a` 或
+`qstat -f -1 <jobid>`。
 
 ---
 
