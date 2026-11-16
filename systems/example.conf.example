@@ -1,0 +1,52 @@
+# =============================================================================
+# Per-system configuration. Copy this file to systems/<name>.conf and edit.
+#
+# All paths may be absolute, or relative to this config file's directory.
+# SYSTEM_NAME must contain only [A-Za-z0-9_.-] and is used in output paths
+# and short PBS job names.
+# PROJECT_DIR defaults to $SCH_WORK_ROOT/projects/<SYSTEM_NAME>; for the shared
+# read-only install, SCH_WORK_ROOT defaults to $HOME/desmond_md_work.
+# =============================================================================
+
+SYSTEM_NAME="example"
+
+# Raw protein-ligand complex (PDB, MAE, or .maegz).
+INPUT_STRUCTURE="/absolute/path/to/complex.pdb"
+
+# Optional: an already prepared complex (MAE/maegz). If set, PrepWizard is
+# skipped, but Desmond system building still runs.
+# PREPARED_STRUCTURE="/absolute/path/to/prepared.mae"
+
+# Receptor / ligand ASL selections. These have NO global defaults.
+# Examples:
+#   RECEPTOR_ASL="chain A"
+#   LIGAND_ASL="chain B"
+#   LIGAND_ASL="res.ptype LIG"
+#   LIGAND_ASL="chain B and not (water or ions)"
+#   RECEPTOR_ASL="protein"          # standard polymer residues
+# For a peptide ligand in a separate chain, use chain selection for both.
+RECEPTOR_ASL="chain A"
+LIGAND_ASL="chain B"
+
+# Optional alignment selection. Default:
+#   (<RECEPTOR_ASL>) and backbone and not (atom.ele H)
+# ALIGN_ASL="chain A and backbone and not (atom.ele H)"
+
+# ---------------- Optional scientific overrides ----------------
+# MD_TIME_NS=300
+# MD_TEMPERATURE=300.0
+# MD_TRAJ_INTERVAL_PS=1000.0
+# MD_SEED=12345
+# PREPWIZARD_PH=7.0
+# PREPWIZARD_NOIMPREF=yes
+# BUFFER_SIZE=10.0
+# SALT_CONC=0.15
+# MMGBSA_LAST_NS=100
+# MMGBSA_STEP_SIZE=2
+# MMGBSA_START_FRAME=
+# MMGBSA_END_FRAME=
+# RUN_ANALYSIS=yes
+# RUN_MMGBSA=yes
+
+# Optional output directory. Default: <pipeline>/projects/<SYSTEM_NAME>.
+# PROJECT_DIR="/absolute/path/to/output"

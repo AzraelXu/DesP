@@ -1,0 +1,16 @@
+# Example 0.1 ns pilot configuration for the shared pipeline.
+# Copy it to $SCH_WORK_ROOT/systems/<name>.conf and edit the paths/ASLs.
+SYSTEM_NAME="gda10_pilot"
+
+# Replace this with your own prepared complex (absolute path readable by you).
+# Use INPUT_STRUCTURE instead if you want PrepWizard to prepare a raw structure.
+PREPARED_STRUCTURE="/path/to/your/complex.mae"
+
+RECEPTOR_ASL="chain A"
+LIGAND_ASL="chain B"
+
+# Short pilot only. Production configs should use the defaults (300 ns, 1 ns frames).
+MD_TIME_NS=0.1
+MD_TRAJ_INTERVAL_PS=10.0
+MMGBSA_LAST_NS=0.1
+MMGBSA_STEP_SIZE=1

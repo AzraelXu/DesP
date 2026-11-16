@@ -1,0 +1,23 @@
+# Runtime output (never commit)
+projects/
+results/
+.gpu_locks/
+*.bak.*
+*.log
+*.cms
+*.maegz
+*.dtr
+*.trj
+*.cpt
+*.eaf
+*.tmp
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

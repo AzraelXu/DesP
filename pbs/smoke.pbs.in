@@ -1,0 +1,85 @@
+#!/bin/bash
+@QUEUE_DIRECTIVE@
+#PBS -N @JOBNAME@
+#PBS -l nodes=1:ppn=1:gpus=1
+@WALLTIME_DIRECTIVE@
+#PBS -j oe
+#PBS -r n
+#PBS -o @PBS_OUT@
+# Stage: GPU smoke test (no MD is started)
+# This file is rendered by submit_smoke.sh. Do not edit by hand.
+set -euo pipefail
+# Some Torque setups do not deliver #PBS -o output; capture it ourselves.
+exec >> "@PBS_OUT@" 2>&1
+
+PIPELINE_ROOT="@PIPELINE_ROOT@"
+SCH_WORK_ROOT="@SCH_WORK_ROOT@"
+SMOKE_DIR="${SCH_WORK_ROOT}/projects/_smoke"
+export PIPELINE_ROOT SCH_WORK_ROOT
+export PROJECT_DIR="$SMOKE_DIR"
+export SCHRODINGER="@SCHRODINGER@"
+@LICENSE_ENV@
+
+mkdir -p "$SMOKE_DIR/logs"
+source "${PIPELINE_ROOT}/scripts/lib/common.sh"
+source "${PIPELINE_ROOT}/scripts/lib/gpu.sh"
+setup_schrodinger_env
+
+echo "=== PBS context ==="
+echo "host=$(hostname)"
+echo "PBS_JOBID=${PBS_JOBID:-unset}"
+echo "PBS_O_WORKDIR=${PBS_O_WORKDIR:-unset}"
+echo "PBS_NODEFILE=${PBS_NODEFILE:-unset}"
+echo "PBS_GPUFILE=${PBS_GPUFILE:-unset}"
+if [[ -n "${PBS_GPUFILE:-}" && -r "${PBS_GPUFILE}" ]]; then
+    echo "--- PBS_GPUFILE content ---"
+    cat "$PBS_GPUFILE"
+fi
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
+echo "SCHRODINGER_CUDA_VISIBLE_DEVICES=${SCHRODINGER_CUDA_VISIBLE_DEVICES:-unset}"
+echo "SCHRODINGER=${SCHRODINGER}"
+echo
+
+echo "=== GPU inventory ==="
+nvidia-smi -L
+nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu,driver_version --format=csv
+echo
+
+echo "=== GPU selection ==="
+select_gpu
+echo
+
+echo "=== license features ==="
+for feat in DESMOND_MAIN DESMOND_GPGPU PRIMEX_MAIN; do
+    if license_has_feature "$feat"; then
+        echo "OK   $feat"
+    else
+        echo "MISS $feat"
+    fi
+done
+echo
+
+echo "=== Schrodinger Python ==="
+"$SCHRODINGER/run" python3 - <<'PY'
+import sys
+print("python", sys.version.split()[0])
+import pandas
+import matplotlib
+import openpyxl
+print("pandas", pandas.__version__)
+print("matplotlib", matplotlib.__version__)
+print("openpyxl", openpyxl.__version__)
+from schrodinger import structure
+from schrodinger.application.desmond.packages import analysis, topo, traj_util
+print("desmond_api OK")
+PY
+echo
+
+echo "=== shared filesystem write test ==="
+testfile="$SMOKE_DIR/logs/write_test.$$"
+echo "smoke" > "$testfile"
+cat "$testfile"
+rm -f "$testfile"
+echo "write OK: $SMOKE_DIR"
+echo
+echo "SMOKE_OK"

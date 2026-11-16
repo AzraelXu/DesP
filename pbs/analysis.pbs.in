@@ -1,0 +1,23 @@
+#!/bin/bash
+@QUEUE_DIRECTIVE@
+#PBS -N @JOBNAME@
+#PBS -l nodes=1:ppn=@PPN@
+@WALLTIME_DIRECTIVE@
+#PBS -j oe
+#PBS -r n
+#PBS -o @PBS_OUT@
+# System: @SYSTEM_NAME@
+# Stage: analysis (trajectory alignment + RMSD, CPU only)
+# This file is rendered by submit_system.sh. Do not edit by hand.
+set -euo pipefail
+# Some Torque setups do not deliver #PBS -o output; capture it ourselves.
+exec >> "@PBS_OUT@" 2>&1
+
+PIPELINE_ROOT="@PIPELINE_ROOT@"
+PROJECT_DIR="@PROJECT_DIR@"
+RUN_ID="@RUN_ID@"
+export PIPELINE_ROOT PROJECT_DIR RUN_ID
+
+source "${PROJECT_DIR}/project.resolved.conf"
+
+bash "${PIPELINE_ROOT}/scripts/stages/50_analysis.sh" "${PROJECT_DIR}"
