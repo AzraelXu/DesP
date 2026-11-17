@@ -19,6 +19,9 @@ Options are passed to submit_system.sh for every system:
   --restart-md
   --no-analysis
   --no-mmgbsa
+
+When a directory is given, example.conf and gda10_pilot.conf are skipped
+as placeholder templates; pass a template file explicitly to submit it.
 EOF
 }
 
@@ -54,6 +57,9 @@ for p in "${CONFIG_ARGS[@]}"; do
     if [[ -d "$p" ]]; then
         shopt -s nullglob
         for f in "$p"/*.conf; do
+            case "$(basename "$f")" in
+                example.conf|gda10_pilot.conf) continue ;;
+            esac
             FILES+=("$f")
         done
         shopt -u nullglob

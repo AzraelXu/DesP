@@ -314,7 +314,6 @@ PBS 可通过 `PBS_GPUFILE` 和/或 `CUDA_VISIBLE_DEVICES` 告知作业分配到
 ├── MULTIUSER.md                 用户快速上手
 ├── config.sh                    机器/PBS/科学默认参数
 ├── systems/example.conf.example 体系配置模板
-├── examples/                    pilot 配置示例
 ├── pbs/*.pbs.in                 PBS 模板（提交时渲染）
 ├── scripts/
 │   ├── lib/                     配置、日志、MSJ/CFG、GPU 选择、status 解析/输出

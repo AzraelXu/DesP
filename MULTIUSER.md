@@ -27,7 +27,7 @@ init 会创建工作区结构、写入 `.desmond_work_root`，并在 `~/.bashrc`
 当前 shell 执行 `source ~/.bashrc`；如果已有旧值，用
 `unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 shell 有效。
 
-init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时间戳>`；
+init 默认直接更新 `~/.bashrc` 托管块，不生成 `.desmond.bak.*` 备份文件；
 不需要改 shell 配置时加 `--no-bashrc`，init 会把 export 和 alias 打印出来
 供手工粘贴。
 

@@ -68,7 +68,7 @@ alias desmond-init='/opt/desmond_md_pipeline/scripts/init_user.sh'
 # ... desmond-check/smoke/submit/batch/status/results/systems
 ```
 
-init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时间戳>`；
+init 默认直接更新 `~/.bashrc` 托管块，不生成 `.desmond.bak.*` 备份文件；
 不需要改 shell 配置时加 `--no-bashrc`，init 会把 export 和 alias 打印出来
 供手工粘贴。
 
@@ -344,8 +344,7 @@ LIGAND_ASL="chain B"
 
 ```text
 systems/
-├── example.conf          # init 复制的模板，需要手工编辑或删除
-├── gda10_pilot.conf      # init 复制的 pilot 模板
+├── example.conf          # init 复制的模板；目录批量提交默认跳过
 ├── pdc1.conf
 ├── PDC1_1.conf
 ├── pdc2.conf
@@ -383,10 +382,10 @@ systems/
 - 每个结构会调用两次 `inspect_structure.py`（报告 + ASL 检查）；约 10 个配体
   通常需要 20–40 秒。`--dry-run` 也会做完整检查。
 
-注意：`init_user.sh` 会复制 `systems/example.conf` 和 `systems/gda10_pilot.conf`，
-它们含占位路径。用 `desmond-batch "$SCH_WORK_ROOT/systems/"` 整目录提交前，
-请先编辑或删除这两个模板，或只提交生成的 `.conf` 文件。如果复合物文件名恰好是
-`example` 或 `gda10_pilot`，生成目标会和模板同名；默认 `skip` 会保留模板并
+注意：`init_user.sh` 只复制 `systems/example.conf` 作为手工模板，它含占位路径。
+`desmond-batch` 在扫描目录时默认跳过 `example.conf`（以及旧版本留下的
+`gda10_pilot.conf`）；如需提交模板本身，请显式传入该文件路径。如果复合物
+文件名恰好是 `example`，生成目标会和模板同名；默认 `skip` 会保留模板并
 警告，需要 `--overwrite` 才会覆盖。
 
 ---
@@ -613,7 +612,8 @@ scratch 在计算节点本地，`qdel` 或 walltime 硬杀可能回传不了。*
 
 每个体系仍是一条独立的 5 作业依赖链；并发由 PBS 按 GPU 总数排队。
 `systems/` 里的配置可由 `desmond-systems` 或 `init_user.sh` 自动生成（见 4.7）；
-整目录提交前先编辑或删除 `example.conf` 和 `gda10_pilot.conf` 两个模板。
+整目录提交会自动跳过 `example.conf`（以及旧的 `gda10_pilot.conf` 模板），
+如需运行模板本身，请显式传入该 `.conf` 文件。
 
 ---
 

@@ -15,6 +15,7 @@ rc=$?
 assert_eq 0 "$rc" "default init exit"
 assert_file_exists "$w1/.desmond_work_root"
 assert_file_exists "$w1/systems/example.conf"
+assert_not_exists "$w1/systems/gda10_pilot.conf"
 assert_file_exists "$h1/.bashrc"
 bashrc="$(cat "$h1/.bashrc")"
 assert_contains "$bashrc" "export SCH_WORK_ROOT='$w1'" "bashrc export"
@@ -85,6 +86,11 @@ rc=$?
 assert_eq 0 "$rc" "root change with --force"
 assert_contains "$(cat "$h3/.bashrc")" "export SCH_WORK_ROOT='$w4'" "bashrc points at new root"
 assert_file_exists "$w3/.desmond_work_root"
+if compgen -G "$h3/.bashrc.desmond.bak.*" >/dev/null; then
+    fail "init created a .bashrc backup"
+else
+    pass
+fi
 
 # ---------------------------------------------------------------------------
 # Missing .bashrc is created; a symlink is preserved.

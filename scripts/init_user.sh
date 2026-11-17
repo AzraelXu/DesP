@@ -412,11 +412,6 @@ if [[ ! -f "${SCH_WORK_ROOT}/systems/example.conf" ]]; then
     cp "${PIPELINE_ROOT}/systems/example.conf.example" \
        "${SCH_WORK_ROOT}/systems/example.conf"
 fi
-if [[ ! -f "${SCH_WORK_ROOT}/systems/gda10_pilot.conf" ]] \
-    && [[ -f "${PIPELINE_ROOT}/examples/gda10_pilot.conf.example" ]]; then
-    cp "${PIPELINE_ROOT}/examples/gda10_pilot.conf.example" \
-       "${SCH_WORK_ROOT}/systems/gda10_pilot.conf"
-fi
 
 {
     printf 'SCH_WORK_ROOT=%s\n' "$SCH_WORK_ROOT"
@@ -553,8 +548,8 @@ if [[ "$SYS_RAN" == "yes" && "$SYS_RC" == "0" ]]; then
         echo "  4) ${PIPELINE_ROOT}/scripts/submit_batch.sh ${SCH_WORK_ROOT}/systems/"
         echo "  5) ${PIPELINE_ROOT}/scripts/status.sh"
     fi
-    echo "     (example.conf and gda10_pilot.conf are templates; edit or remove"
-    echo "      them before submitting the whole systems/ directory.)"
+    echo "     (example.conf is a template; directory batch submission skips it"
+    echo "      by default. Pass it explicitly if you really need to run it.)"
 else
     echo "  1) Edit ${SCH_WORK_ROOT}/systems/example.conf (input path + ASLs)."
     if [[ "$BASHRC_OK" == "yes" ]]; then

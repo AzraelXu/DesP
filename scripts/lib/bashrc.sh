@@ -145,15 +145,12 @@ desmond_bashrc_install() {
         return 0
     fi
 
-    local backup="${target}.desmond.bak.$(date '+%Y%m%d%H%M%S')"
-    cp -p "$target" "$backup" 2>/dev/null || true
-
     if ! cat "$tmp" > "$target"; then
         echo "WARNING: failed to write ${target}" >&2
         rm -f "$tmp"
         return 1
     fi
     rm -f "$tmp"
-    echo "Updated ${brc} (backup: ${backup})"
+    echo "Updated ${brc}"
     return 0
 }
