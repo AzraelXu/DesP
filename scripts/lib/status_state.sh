@@ -392,6 +392,51 @@ project_total_duration() {
     fi
 }
 
+# Find the newest Desmond engine log for a running MD job. multisim runs the
+# engine in a scratch directory (usually $HOME/tmp/$USER) and copies the log
+# into the project only when the stage finishes; check both places.
+find_md_engine_log() {
+    local pdir="$1"
+    local name="$2"
+    local start_epoch="${3:-0}"
+    local -a candidates=()
+    local base="$pdir/desmond_md_job_${name}/desmond_md_job_${name}.log"
+    [[ -f "$base" ]] && candidates+=("$base")
+    local user="${USER:-}"
+    local root
+    for root in "${SCHRODINGER_TMPDIR:-}" "${TMPDIR:-}" \
+                "${HOME:-}/tmp/${user}" "${HOME:-}/tmp"; do
+        [[ -n "$root" && -d "$root" ]] || continue
+        local d=""
+        while IFS= read -r -d '' d; do
+            [[ -f "$d/desmond_md_job_${name}.log" ]] \
+                && candidates+=("$d/desmond_md_job_${name}.log")
+        done < <(find "$root" -maxdepth 1 -type d \
+            \( -name "desmond_md_job_${name}" -o -name "desmond_md_job_${name}.*" \) \
+            -print0 2>/dev/null)
+    done
+    (( ${#candidates[@]} > 0 )) || return 1
+    local best="" best_mtime=-1 best_chem="-1"
+    local f m c
+    for f in "${candidates[@]}"; do
+        m="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+        c="$(md_log_value "$f" chemical_ps 2>/dev/null || echo 0)"
+        [[ -n "$c" ]] || c=0
+        if (( m > best_mtime )) || { (( m == best_mtime )) && \
+                awk -v a="$c" -v b="$best_chem" \
+                    'BEGIN { exit !(a + 0 > b + 0) }'; }; then
+            best="$f"
+            best_mtime="$m"
+            best_chem="$c"
+        fi
+    done
+    [[ -n "$best" ]] || return 1
+    if (( start_epoch > 0 && best_mtime + 60 < start_epoch )); then
+        return 1
+    fi
+    printf '%s' "$best"
+}
+
 md_progress() {
     local pdir="$1"
     local name="$2"
@@ -401,13 +446,11 @@ md_progress() {
     MD_RATE_SRC=""
     MD_PCT=""
     MD_ETA=""
-    local log="$pdir/desmond_md_job_${name}/desmond_md_job_${name}.log"
-    [[ -f "$log" ]] || return 1
-    local mtime
-    mtime="$(stat -c %Y "$log" 2>/dev/null || echo 0)"
-    if (( start_epoch > 0 && mtime + 60 < start_epoch )); then
-        return 1
-    fi
+    MD_LOG=""
+    local log
+    log="$(find_md_engine_log "$pdir" "$name" "$start_epoch" || true)"
+    [[ -n "$log" ]] || return 1
+    MD_LOG="$log"
     MD_CHEM="$(md_log_value "$log" chemical_ps || true)"
     [[ -n "$MD_CHEM" ]] || return 1
     MD_RATE="$(md_log_rate_avg "$log" 10 || true)"

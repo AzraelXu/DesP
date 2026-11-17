@@ -85,6 +85,7 @@ MD_RATE=""
 MD_RATE_SRC=""
 MD_PCT=""
 MD_ETA=""
+MD_LOG=""
 
 
 source "${PIPELINE_ROOT}/scripts/lib/status_state.sh"

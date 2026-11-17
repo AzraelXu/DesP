@@ -301,6 +301,7 @@ print_project() {
             start="$(stage_start_epoch "md" "${STAGE_SLOG[md]:-}" || true)"
             if md_progress "$pdir" "$name" "${start:-0}"; then
                 echo "Progress: ${MD_CHEM} / ${F_MD_TIME_PS} ps (${MD_PCT}%), avg rate ${MD_RATE} ns/day (${MD_RATE_SRC})"
+                [[ -n "${MD_LOG:-}" ]] && echo "Log     : ${MD_LOG}"
                 if [[ -n "$MD_ETA" ]]; then
                     echo "ETA     : ~$(fmt_duration "$MD_ETA")${left_txt}"
                     if [[ -n "$left" ]] && (( MD_ETA > left )); then
@@ -310,7 +311,12 @@ print_project() {
                     echo "ETA     : unknown (engine log has no ns/day rate)${left_txt}"
                 fi
             else
-                echo "ETA     : unknown (engine log not in project dir yet)${left_txt}"
+                [[ -n "${MD_LOG:-}" ]] && echo "Log     : ${MD_LOG}"
+                if [[ -n "${MD_LOG:-}" ]]; then
+                    echo "ETA     : unknown (engine log found but no progress yet)${left_txt}"
+                else
+                    echo "ETA     : unknown (engine log not found yet)${left_txt}"
+                fi
             fi
         else
             echo "ETA     : unknown for this stage (no progress metric)${left_txt}"

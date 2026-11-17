@@ -75,6 +75,44 @@ assert_not_contains "$qlog" "-f -1 991" "no qstat for current-run PREP marker"
 assert_not_contains "$qlog" "-f -1 994" "no qstat for current-run MIN marker"
 
 # ---------------------------------------------------------------------------
+# Running MD whose engine log is only in shared scratch ($HOME/tmp/$USER).
+# ---------------------------------------------------------------------------
+reset_status_state
+works="$SANDBOX/work-scratch"
+ps="$works/projects/pscratch"
+make_project "$ps" pscratch
+write_jobs_env "$ps" run1 "$submitted"
+write_done "$ps" prepwizard 991 run1 "$submitted" "$(ts $((now - 7000)))"
+write_done "$ps" setup 991 run1 "$submitted" "$(ts $((now - 7000)))"
+write_done "$ps" min 994 run1 "$submitted" "$(ts $((now - 7000)))"
+scratch="$SANDBOX/home/tmp/testuser/desmond_md_job_pscratch.1"
+mkdir -p "$scratch"
+for i in 1 2 3 4 5; do
+    printf 'Chemical time: %s ps, Step: %s, ns/day: 250.1\n' \
+        "$((i * 86))" "$((i * 100))" >> "$scratch/desmond_md_job_pscratch.log"
+done
+# A similarly prefixed system must not be selected.
+mkdir -p "$SANDBOX/home/tmp/testuser/desmond_md_job_pscratch_2"
+printf 'Chemical time: 9999.0 ps, Step: 1, ns/day: 999.9\n' \
+    > "$SANDBOX/home/tmp/testuser/desmond_md_job_pscratch_2/desmond_md_job_pscratch_2.log"
+write_qstat_fixture "$SANDBOX/qstat" 995 R \
+    "resources_used.walltime = 02:14:00" \
+    "Resource_List.walltime = 96:00:00" \
+    "start_time = $(ts_qstat $((now - 8040)))"
+write_qstat_fixture "$SANDBOX/qstat" 996 H \
+    "Hold_Types = s" "Resource_List.walltime = 12:00:00"
+write_qstat_fixture "$SANDBOX/qstat" 997 H \
+    "Hold_Types = s" "Resource_List.walltime = 48:00:00"
+
+out="$(run_status "$works" pscratch)"
+assert_contains "$out" "Step    : md (4/6) -- running (PBS 995)" "scratch MD running"
+assert_contains "$out" "Progress: 430 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)" \
+    "scratch MD progress"
+assert_contains "$out" "Log     : $scratch/desmond_md_job_pscratch.log" "scratch log path"
+assert_contains "$out" "ETA     : ~" "scratch MD ETA"
+assert_not_contains "$out" "pscratch_2" "prefixed system not used"
+
+# ---------------------------------------------------------------------------
 # Failed min: FAILED line, blocked downstream, PBS/stage-log tail.
 # ---------------------------------------------------------------------------
 reset_status_state
