@@ -146,7 +146,8 @@ sudo rsync -a --delete \
 显式允许在源码树、`$HOME`、`/`、`/tmp` 等位置初始化，或替换 `~/.bashrc` 中
 指向其他 root 的托管块。init 还会在 `~/.bashrc` 写入托管块，导出
 `SCH_WORK_ROOT` 并配置 `desmond-init`、`desmond-check`、`desmond-smoke`、
-`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results` 别名。
+`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results`、
+`desmond-systems` 别名。
 
 从旧版本升级：在旧工作区里重新运行一次 `init_user.sh` 即可补上
 `.desmond_work_root` 标记（项目和输出不动）；也可以继续显式
@@ -203,9 +204,9 @@ sudo rsync -a --delete \
 其他由提交脚本管理的变量：`MIN_SEED`（默认等于 `MD_SEED`）、`RUN_ID`、
 `FORCE_STAGES`、`RESTART_MD`、`SIGNATURE`；不要手工写入 `config.sh`。
 
-### 3.4 系统模板
+### 3.4 系统模板与自动生成
 
-`systems/example.conf.example` 是唯一的体系模板。必填：
+`systems/example.conf.example` 是手工配置模板。必填：
 
 - `SYSTEM_NAME`（`[A-Za-z0-9_.-]`，以字母/数字开头）；
 - `INPUT_STRUCTURE` 或 `PREPARED_STRUCTURE`；
@@ -227,6 +228,14 @@ sudo rsync -a --delete \
 建议：来自 MOE/建模软件、含非标准残基或非标准原子名的结构优先用 MAE。MAE
 携带键级和形式电荷；PDB 没有键级，PrepWizard 可能把非标准命名残基误判为链
 断裂并添加端基。
+
+批量场景可不手工复制：在存放复合物的目录运行 `init_user.sh`（或
+`scripts/generate_systems.sh`）会扫描 `*.pdb/*.mae/*.maegz`，检查所有复合物的
+配体是否在同一条链，并为每个复合物生成 `systems/<文件名>.conf`。生成配置只写
+`SYSTEM_NAME`、一个结构变量、`RECEPTOR_ASL`、`LIGAND_ASL`，其余走 `config.sh`
+默认值，与手工最小配置完全等价；默认写 `INPUT_STRUCTURE`（MAE 也走 PrepWizard），
+`--structure-field prepared` 可改为 `PREPARED_STRUCTURE`（仅 MAE/maegz）。
+命名模板、清单文件、`--dry-run`、幂等/覆盖策略详见 TUTORIAL 4.7。
 
 ---
 
@@ -316,8 +325,11 @@ PBS 可通过 `PBS_GPUFILE` 和/或 `CUDA_VISIBLE_DEVICES` 告知作业分配到
 │   ├── check_env.sh             登录节点环境检查
 │   ├── status.sh                当前阶段 / ETA / 本 run WARN-FATAL
 │   ├── collect_results.sh       汇总 RMSD 图与 MM-GBSA 表
-│   ├── init_user.sh             初始化工作区 + ~/.bashrc 快捷命令
-│   └── inspect_structure.py     链/HET/水/离子 + ASL 原子数校验
+│   ├── init_user.sh             初始化工作区 + ~/.bashrc + 自动生成体系
+│   ├── generate_systems.sh      批量生成 systems/*.conf（wrapper）
+│   ├── generate_systems.py      批量生成的 CLI 与编排
+│   ├── system_generation.py     批量发现/配体链检查/命名/写配置
+│   └── inspect_structure.py     链/HET/水/离子 + ASL 原子数/链集合
 └── tools/
     ├── validate_cms.py          CMS 完整性检查
     ├── compute_ligand_rmsd.py   配体 RMSD
@@ -329,7 +341,7 @@ PBS 可通过 `PBS_GPUFILE` 和/或 `CUDA_VISIBLE_DEVICES` 告知作业分配到
 
 ```
 $SCH_WORK_ROOT/
-├── systems/                     用户的 <name>.conf
+├── systems/                     用户的 <name>.conf（可自动生成）
 ├── projects/<SYSTEM_NAME>/      项目输出（见 TUTORIAL 的输出目录）
 ├── results/                     collect_results.sh 汇总
 └── .gpu_locks/                  GPU 回退锁
@@ -503,7 +515,9 @@ $SCHRODINGER/utilities/prepwizard <input> prepwizard-out.maegz \
    `prepwizard/prepwizard-out.maegz`，跳过 PrepWizard；仍会校验 CMS/ASL。
 
 参数由 `PREPWIZARD_*` 控制。输出立即用 `tools/validate_cms.py` 解析所有 CT，
-并用 `inspect_structure.py` 检查 ligand/align ASL 非空。
+并用 `inspect_structure.py` 检查 ligand/align ASL 非空。`inspect_structure.py
+--json-out` 的 `asl.<label>` 现在还包含 `chains`（选中原子所在的链集合），
+批量生成器据此检查同一批复合物的配体链是否一致。
 
 ### 8.2 `20_setup.sh`
 

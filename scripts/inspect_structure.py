@@ -96,7 +96,15 @@ def describe_structure(st, receptor_asl, ligand_asl, align_asl):
             continue
         try:
             ids = evaluate_asl(st, asl)
-            asl_results[label] = {"asl": asl, "atoms": len(ids)}
+            result = {"asl": asl, "atoms": len(ids)}
+            try:
+                result["chains"] = sorted({
+                    str(st.atom[i].chain).strip() or "<blank>" for i in ids
+                })
+            except (IndexError, KeyError, TypeError, ValueError) as exc:
+                print("WARNING: cannot list chains for ASL {!r}: {}".format(asl, exc),
+                      file=sys.stderr)
+            asl_results[label] = result
         except RuntimeError as exc:
             asl_results[label] = {"asl": asl, "atoms": None, "error": str(exc)}
 

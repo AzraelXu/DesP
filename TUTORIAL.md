@@ -65,12 +65,15 @@ if [[ -z "${SCH_WORK_ROOT:-}" ]]; then
   export SCH_WORK_ROOT='/home/user1/Documents/PSMA_PDC/PDC/test'
 fi
 alias desmond-init='/opt/desmond_md_pipeline/scripts/init_user.sh'
-# ... desmond-check/smoke/submit/batch/status/results
+# ... desmond-check/smoke/submit/batch/status/results/systems
 ```
 
 init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时间戳>`；
 不需要改 shell 配置时加 `--no-bashrc`，init 会把 export 和 alias 打印出来
 供手工粘贴。
+
+如果运行 init 的目录里有 `*.pdb` / `*.mae` / `*.maegz` 复合物，init 还会
+自动检查配体链并生成 `systems/*.conf`（见 4.7）；不需要时加 `--no-systems`。
 
 当前 shell 执行 `source ~/.bashrc` 后即可使用 `desmond-status` 等快捷命令；
 如果当前 shell 已经有旧的 `SCH_WORK_ROOT`，用
@@ -259,6 +262,132 @@ LIGAND_ASL="chain B"
 - 输入文件 sha256 + 科学参数生成 `SIGNATURE`。若已有完成阶段且签名变化，
   提交会被拒绝，必须显式 `--force` 或 `--from`。
 - `--force` 不删除旧结果，而是把旧目录重命名为 `<dir>.bak.<timestamp>`。
+
+### 4.7 批量生成体系配置
+
+如果同一靶标有多个配体复合物，不必手工复制模板。`init_user.sh` 默认会
+扫描**运行 init 的目录**（不是 `--work-root`）下的 `*.pdb`、`*.mae`、
+`*.maegz`，检查所有复合物的配体是否在同一条链上；一致时为每个复合物生成
+`systems/<复合物名>.conf`，不一致则报错并提示统一配体链，不会写入任何配置。
+
+```bash
+cd /home/user1/Documents/PSMA_PDC/PDC
+/opt/desmond_md_pipeline/scripts/init_user.sh          # 自动扫描并生成
+```
+
+也可以单独运行生成器（推荐先 `--dry-run` 看计划）：
+
+```bash
+cd /home/user1/Documents/PSMA_PDC/PDC
+
+# 只打印将生成的体系名/路径/ASL，不落盘
+desmond-systems --dry-run
+
+# 指定配体链（例如自动识别有歧义时）
+desmond-systems --ligand-chain B
+
+# 扫描其他目录
+desmond-systems --input-dir /path/to/complexes
+
+# 显式清单（每行一个路径，# 注释；相对路径按清单所在目录解析）
+desmond-systems --manifest structures.txt
+
+# 自定义体系名：{target}_{ligand}_{index}
+desmond-systems --target PSMA \
+  --name-template '{target}_{ligand}_{index:02d}'
+```
+
+常用参数：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--input-dir DIR` | 当前目录 | 扫描目录（不递归） |
+| `--recursive` | 关 | 递归扫描；跳过隐藏目录、`projects/`、`results/`、`systems/`、`.gpu_locks/` 和嵌套 work root |
+| `--manifest FILE` | 无 | 显式文件清单，优先于 `--input-dir` |
+| `--ligand-chain ID` | 自动识别 | 强制配体链；支持肽类配体 |
+| `--ligand-resname NAME[,..]` | 无 | 按残基名选择配体；生成 `chain X and res.ptype NAME` 形式的 ASL |
+| `--ligand-asl ASL` | 无 | 显式配体 ASL；支持配体与蛋白共享链（受体会减去该 ASL） |
+| `--structure-field {input,prepared}` | `input` | 写 `INPUT_STRUCTURE`（PrepWizard）或 `PREPARED_STRUCTURE`（跳过 PrepWizard；仅 MAE/maegz） |
+| `--name-template TPL` | `{stem}` | 支持 `{stem}` `{target}` `{ligand}` `{index}` |
+| `--target NAME` | 无 | `{target}` 的值，也用于从文件名剥离配体名 |
+| `--ligand-name-source LIST` | `filename,resname,index` | `{ligand}` 的取值优先级 |
+| `--name-conflict {error,suffix}` | `error` | 规范化后重名时：报错或追加 `_2`、`_3` |
+| `--on-existing {skip,overwrite,error}` | `skip` | 已存在同名配置时的策略 |
+| `--overwrite` / `--skip` | `skip` | 上面策略的快捷方式 |
+| `--dry-run` | 关 | 只打印计划，不写 `systems/` |
+
+命名与路径规则：
+
+- 默认体系名就是复合物文件名去掉扩展名；非法字符（空格等）替换为 `_`，
+  首字符不是字母/数字时加前缀 `s`。仅大小写不同的体系名在 Linux 上允许
+  （会警告）；在大小写不敏感的文件系统（SMB/CIFS、macOS）上请用不同模板
+  或 `--name-conflict error` 避免同名。
+- `{index}` 是发现顺序（manifest 行序或目录内文件名排序）的 1 基编号，
+  即使某个文件后续解析失败，它仍占用一个编号。
+- `{ligand}` 默认先尝试文件名（`--ligand-regex` 的 `ligand` 命名组/第 1 捕获组；
+  否则剥离 `--target` 前缀），再尝试残基名（`UNK/UNL/LIG/MOL` 等泛化名跳过），
+  最后回退到 `{index}`。
+- 配置里的结构路径一律是**绝对路径**（`realpath`）；`.conf` 本身仍在
+  `$SCH_WORK_ROOT/systems/`。
+- 生成配置只写 4 个必填字段，其余参数留空走 `config.sh` 默认值，与手工最小配置
+  完全等价；下游 `submit_system.sh` / `submit_batch.sh` 无需改动。
+
+生成结果示例：
+
+```bash
+# systems/pdc1.conf
+SYSTEM_NAME="pdc1"
+INPUT_STRUCTURE="/home/user1/Documents/PSMA_PDC/PDC/pdc1.mae"
+RECEPTOR_ASL="chain A"
+LIGAND_ASL="chain B"
+```
+
+```text
+systems/
+├── example.conf          # init 复制的模板，需要手工编辑或删除
+├── gda10_pilot.conf      # init 复制的 pilot 模板
+├── pdc1.conf
+├── PDC1_1.conf
+├── pdc2.conf
+└── pdc2_7.conf
+```
+
+配体识别与报错：
+
+- 默认把“有非聚合物 HET 基团”的链当作候选配体链（水、离子、标准聚合物残基
+  已被 `inspect_structure.py` 排除）；必须恰好一条，否则报错并提示用
+  `--ligand-chain` / `--ligand-resname`。
+- 同一链上有多个 HET 基团（如 `UNK` + `UNL`）时，默认报错；用
+  `--ligand-resname UNK` 生成残基限定 ASL，或用 `--ligand-asl` 精确选择。
+  若同名残基出现在多条链上，可同时用 `--ligand-resname UNK --ligand-chain B`
+  限定链。
+- 链 ID 为空或含空格等特殊字符时，`--ligand-chain`/自动模式无法构造合法的
+  `chain X` ASL；请用 `--ligand-asl` 指定配体，受体回退为 `protein`。
+- 所有成功解析的复合物必须得到相同的配体链；不一致时打印每个文件的链 ID
+  并退出 1，不生成任何配置。先统一输入结构的链 ID，或用 `--ligand-chain`
+  强制选择。
+- `--ligand-resname` 生成 `LIGAND_ASL="chain B and res.ptype UNK"`，并用
+  Schrödinger ASL 检查确认选中的原子数与目标残基一致；不一致会要求改用
+  `--ligand-asl`。
+- `--ligand-asl` 用于共享链/特殊选择；若配体与蛋白在同一条链，生成的
+  `RECEPTOR_ASL` 形如 `(chain A) and not (<配体 ASL>)`，不会丢掉该链的蛋白。
+
+幂等与失败处理：
+
+- 重复运行默认 `skip`：内容相同打印 `[SKIP]`；内容不同打印 `[WARN] ... kept`
+  并保留你手工改过的文件，需 `--overwrite` 才会重写。
+- `--on-existing error` 把内容不同的已有配置记为失败；`--overwrite` 重写并
+  警告手工修改会丢失。
+- 单个结构解析失败只记录并跳过，其余体系继续生成；最后打印
+  `created/overwritten/skipped/failed` 汇总，有失败时退出码为 1。
+- 每个结构会调用两次 `inspect_structure.py`（报告 + ASL 检查）；约 10 个配体
+  通常需要 20–40 秒。`--dry-run` 也会做完整检查。
+
+注意：`init_user.sh` 会复制 `systems/example.conf` 和 `systems/gda10_pilot.conf`，
+它们含占位路径。用 `desmond-batch "$SCH_WORK_ROOT/systems/"` 整目录提交前，
+请先编辑或删除这两个模板，或只提交生成的 `.conf` 文件。如果复合物文件名恰好是
+`example` 或 `gda10_pilot`，生成目标会和模板同名；默认 `skip` 会保留模板并
+警告，需要 `--overwrite` 才会覆盖。
 
 ---
 
@@ -483,6 +612,8 @@ scratch 在计算节点本地，`qdel` 或 walltime 硬杀可能回传不了。*
 ```
 
 每个体系仍是一条独立的 5 作业依赖链；并发由 PBS 按 GPU 总数排队。
+`systems/` 里的配置可由 `desmond-systems` 或 `init_user.sh` 自动生成（见 4.7）；
+整目录提交前先编辑或删除 `example.conf` 和 `gda10_pilot.conf` 两个模板。
 
 ---
 

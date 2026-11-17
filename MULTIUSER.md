@@ -22,7 +22,8 @@ cd /home/user1/Documents/PSMA_PDC/PDC/test
 
 init 会创建工作区结构、写入 `.desmond_work_root`，并在 `~/.bashrc` 托管块中
 `export SCH_WORK_ROOT` 并配置 `desmond-init`、`desmond-check`、`desmond-smoke`、
-`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results`。
+`desmond-submit`、`desmond-batch`、`desmond-status`、`desmond-results`、
+`desmond-systems`。
 当前 shell 执行 `source ~/.bashrc`；如果已有旧值，用
 `unset SCH_WORK_ROOT && source ~/.bashrc`。别名只在交互 shell 有效。
 
@@ -39,6 +40,7 @@ init 默认更新 `~/.bashrc`，修改前备份为 `~/.bashrc.desmond.bak.<时�
 | `desmond-batch` | `scripts/submit_batch.sh` |
 | `desmond-status` | `scripts/status.sh` |
 | `desmond-results` | `scripts/collect_results.sh` |
+| `desmond-systems` | `scripts/generate_systems.sh` |
 
 自定义位置：
 
@@ -77,6 +79,22 @@ SCH_WORK_ROOT=/path/to/my_work /opt/desmond_md_pipeline/scripts/init_user.sh
 ---
 
 ## 2. 配置自己的体系
+
+如果复合物结构（`*.pdb` / `*.mae` / `*.maegz`）就放在运行 init 的目录里，
+init 会自动为每个复合物生成 `systems/<文件名>.conf`。也可以手动补生成：
+
+```bash
+cd /home/user1/Documents/PSMA_PDC/PDC
+desmond-systems --dry-run       # 先看计划
+desmond-systems                 # 生成；默认跳过已存在且相同的配置
+desmond-systems --ligand-chain B --overwrite
+```
+
+默认会把配体识别为“非聚合物 HET 基团所在的链”；所有复合物必须在同一链上，
+否则会报错并要求先统一。更多命名模板、清单文件、`--ligand-resname` /
+`--ligand-asl` 等用法见 `TUTORIAL.md` 4.7。
+
+也可以手工复制模板：
 
 ```bash
 cp /opt/desmond_md_pipeline/systems/example.conf.example \

@@ -195,5 +195,8 @@ run_init() {
         USER=testuser LC_ALL=C TZ=UTC \
         SCH_WORK_ROOT="${INIT_SCH_WORK_ROOT:-}" \
         PIPELINE_WORK_ROOT="${INIT_PIPELINE_WORK_ROOT:-}" \
+        SCHRODINGER="${INIT_SCHRODINGER:-$SANDBOX/no-schrodinger}" \
+        FAKE_INSPECT_DIR="${INIT_FAKE_INSPECT_DIR:-}" \
+        FAKE_PYTHON="${INIT_FAKE_PYTHON:-}" \
         bash "$REPO_ROOT/scripts/init_user.sh" "$@" 2>&1 )
 }

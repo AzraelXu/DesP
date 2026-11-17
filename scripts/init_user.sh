@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
+INVOCATION_DIR="$(pwd -P 2>/dev/null || printf '%s' "${PWD:-}")"
 source "${PIPELINE_ROOT}/scripts/lib/bashrc.sh"
 
 die()  { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
@@ -25,6 +26,38 @@ Options:
   --no-bashrc       Do not modify ~/.bashrc.
   -h, --help        Show this help.
 
+System generation (runs after the work root is created):
+  By default, init_user.sh scans the directory it was run from for
+  .pdb/.mae/.maegz complexes and writes systems/<name>.conf for each one.
+  All complexes must have the ligand on the same chain. If generation has
+  failures, init still completes the work-root setup but exits non-zero;
+  use --no-systems to skip generation entirely.
+
+  --no-systems      Do not scan for structures or generate configs.
+  --input-dir DIR   Scan DIR instead of the invocation directory.
+  --manifest FILE   Use an explicit list of structure files.
+  --recursive       Scan subdirectories (skips nested work roots).
+  --ligand-chain ID Force the ligand chain (default: auto-detect).
+  --ligand-resname NAME[,NAME...]  Select the ligand by residue name.
+  --ligand-asl ASL  Explicit ligand ASL (supports ligand/protein shared chains).
+  --ligand-regex RE Extract {ligand} from the file name.
+  --structure-field {input,prepared}
+                    Write INPUT_STRUCTURE (default) or PREPARED_STRUCTURE.
+  --name-template TPL
+                    System-name template (default: {stem}); fields:
+                    {stem} {target} {ligand} {index}.
+  --target NAME     Value for {target}.
+  --ligand-name-source LIST
+                    Priority list for {ligand} (default: filename,resname,index).
+  --name-conflict {error,suffix}
+                    Action for normalized name collisions (default: error).
+  --on-existing {skip,overwrite,error}
+                    Action when systems/<name>.conf already exists (default: skip).
+  --overwrite       Shortcut for --on-existing overwrite.
+  --skip            Shortcut for --on-existing skip (default).
+  --dry-run         Preview system generation only; init still creates the
+                    work-root layout and the managed ~/.bashrc block.
+
 The work root is recorded in DIR/.desmond_work_root and exported from the
 managed ~/.bashrc block. If DIR is not writable, $HOME/desmond_md_work is used.
 EOF
@@ -33,6 +66,16 @@ EOF
 WORK_ROOT_ARG=""
 FORCE="no"
 NO_BASHRC="no"
+
+NO_SYSTEMS="no"
+INPUT_DIR=""
+INPUT_DIR_SET="no"
+MANIFEST=""
+RECURSIVE="no"
+GEN_ARGS=()
+GEN_FLAGS_USED="no"
+EXISTING_MODE=""
+SYS_DRY="no"
 
 while (( $# > 0 )); do
     case "$1" in
@@ -49,6 +92,80 @@ while (( $# > 0 )); do
             NO_BASHRC="yes"
             shift
             ;;
+        --no-systems)
+            NO_SYSTEMS="yes"
+            shift
+            ;;
+        --input-dir)
+            [[ $# -ge 2 && -n "$2" ]] || die "--input-dir requires a directory"
+            INPUT_DIR="$2"
+            INPUT_DIR_SET="yes"
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --manifest)
+            [[ $# -ge 2 && -n "$2" ]] || die "--manifest requires a file"
+            MANIFEST="$2"
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --recursive)
+            RECURSIVE="yes"
+            GEN_ARGS+=(--recursive)
+            GEN_FLAGS_USED="yes"
+            shift
+            ;;
+        --ligand-chain|--ligand-resname|--ligand-asl|--ligand-regex|--name-template|--target|--ligand-name-source)
+            [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value"
+            GEN_ARGS+=("$1" "$2")
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --structure-field)
+            [[ $# -ge 2 && -n "$2" ]] || die "--structure-field requires a value"
+            case "$2" in
+                input|prepared) ;;
+                *) die "--structure-field must be input or prepared" ;;
+            esac
+            GEN_ARGS+=("$1" "$2")
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --name-conflict)
+            [[ $# -ge 2 && -n "$2" ]] || die "--name-conflict requires a value"
+            case "$2" in
+                error|suffix) ;;
+                *) die "--name-conflict must be error or suffix" ;;
+            esac
+            GEN_ARGS+=("$1" "$2")
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --on-existing)
+            [[ $# -ge 2 && -n "$2" ]] || die "--on-existing requires a value"
+            case "$2" in
+                skip|overwrite|error) ;;
+                *) die "--on-existing must be skip, overwrite, or error" ;;
+            esac
+            [[ -z "$EXISTING_MODE" ]] || die "--on-existing/--overwrite/--skip may be given only once"
+            EXISTING_MODE="$2"
+            GEN_ARGS+=("$1" "$2")
+            GEN_FLAGS_USED="yes"
+            shift 2
+            ;;
+        --overwrite|--skip)
+            [[ -z "$EXISTING_MODE" ]] || die "--on-existing/--overwrite/--skip may be given only once"
+            EXISTING_MODE="${1#--}"
+            GEN_ARGS+=(--on-existing "$EXISTING_MODE")
+            GEN_FLAGS_USED="yes"
+            shift
+            ;;
+        --dry-run)
+            GEN_ARGS+=(--dry-run)
+            GEN_FLAGS_USED="yes"
+            SYS_DRY="yes"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -59,6 +176,23 @@ while (( $# > 0 )); do
             ;;
     esac
 done
+
+if [[ "$NO_SYSTEMS" == "yes" && "$GEN_FLAGS_USED" == "yes" ]]; then
+    die "--no-systems cannot be combined with system-generation options"
+fi
+if [[ -n "$MANIFEST" && "$INPUT_DIR_SET" == "yes" ]]; then
+    die "--manifest and --input-dir are mutually exclusive"
+fi
+if [[ -z "$INPUT_DIR" ]]; then
+    INPUT_DIR="$INVOCATION_DIR"
+fi
+if [[ "$NO_SYSTEMS" == "no" ]]; then
+    if [[ -n "$MANIFEST" ]]; then
+        [[ -f "$MANIFEST" ]] || die "--manifest file not found: $MANIFEST"
+    elif [[ "$INPUT_DIR_SET" == "yes" ]]; then
+        [[ -d "$INPUT_DIR" ]] || die "--input-dir is not a directory: $INPUT_DIR"
+    fi
+fi
 
 CALLER_SCH_WORK_ROOT="${SCH_WORK_ROOT:-}"
 CALLER_PIPELINE_WORK_ROOT="${PIPELINE_WORK_ROOT:-}"
@@ -249,6 +383,25 @@ export SCH_WORK_ROOT="$CANON_SELECTED"
 unset PIPELINE_WORK_ROOT
 source "${PIPELINE_ROOT}/config.sh"
 
+# Validate generation arguments before creating the layout or touching
+# ~/.bashrc. This uses generate_systems.py's own parser, so the checks stay in
+# sync with the standalone CLI.
+if [[ "$NO_SYSTEMS" == "no" && "$GEN_FLAGS_USED" == "yes" \
+      && -x "${SCHRODINGER}/run" && ( -n "$MANIFEST" || -d "$INPUT_DIR" ) ]]; then
+    ARG_CHECK=(--check-args)
+    if [[ -n "$MANIFEST" ]]; then
+        ARG_CHECK+=(--manifest "$MANIFEST")
+    else
+        ARG_CHECK+=(--input-dir "$INPUT_DIR")
+    fi
+    if (( ${#GEN_ARGS[@]} > 0 )); then
+        ARG_CHECK+=("${GEN_ARGS[@]}")
+    fi
+    env SCH_WORK_ROOT="$SCH_WORK_ROOT" SCHRODINGER="$SCHRODINGER" \
+        "${SCHRODINGER}/run" python3 "${PIPELINE_ROOT}/scripts/generate_systems.py" \
+        "${ARG_CHECK[@]}" || exit $?
+fi
+
 # ---------------------------------------------------------------------------
 # Create the layout and record the marker.
 # ---------------------------------------------------------------------------
@@ -281,6 +434,7 @@ ALIASES=(
     "desmond-batch=${PIPELINE_ROOT}/scripts/submit_batch.sh"
     "desmond-status=${PIPELINE_ROOT}/scripts/status.sh"
     "desmond-results=${PIPELINE_ROOT}/scripts/collect_results.sh"
+    "desmond-systems=${PIPELINE_ROOT}/scripts/generate_systems.sh"
 )
 
 BASHRC_OK="no"
@@ -289,6 +443,61 @@ if [[ "$NO_BASHRC" == "no" ]]; then
         BASHRC_OK="yes"
     else
         warn "${BASHRC} was not updated; use the export/aliases printed below."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Batch system generation. The find below is only a cheap "should we invoke"
+# probe; generate_systems.py performs the authoritative discovery.
+# ---------------------------------------------------------------------------
+SYS_RC=0
+SYS_RAN="no"
+if [[ "$NO_SYSTEMS" == "no" && -z "$MANIFEST" && ! -d "$INPUT_DIR" ]]; then
+    echo "Input directory is not usable: ${INPUT_DIR}; system generation skipped."
+    NO_SYSTEMS="yes"
+fi
+if [[ "$NO_SYSTEMS" == "no" ]]; then
+    HAVE_INPUTS=""
+    FIND_RC=0
+    if [[ -n "$MANIFEST" ]]; then
+        HAVE_INPUTS="yes"
+    elif [[ "$RECURSIVE" == "yes" ]]; then
+        HAVE_INPUTS="$(find -H "$INPUT_DIR" -mindepth 1 \
+            -type d \( -name '.*' -o -name .gpu_locks -o -name projects -o -name results \
+               -o -name systems -o -name __pycache__ \) -prune -o \
+            -type d -exec sh -c 'test -f "$1/.desmond_work_root"' sh {} \; -prune -o \
+            -xtype f \( -iname '*.pdb' -o -iname '*.mae' -o -iname '*.maegz' \) \
+            -print -quit 2>/dev/null)" || FIND_RC=$?
+    else
+        HAVE_INPUTS="$(find -H "$INPUT_DIR" -maxdepth 1 \
+            -xtype f \( -iname '*.pdb' -o -iname '*.mae' -o -iname '*.maegz' \) \
+            -print -quit 2>/dev/null)" || FIND_RC=$?
+    fi
+    if [[ -z "$HAVE_INPUTS" && "$FIND_RC" != "0" ]]; then
+        warn "cannot scan ${INPUT_DIR}; attempting system generation anyway"
+        HAVE_INPUTS="yes"
+    fi
+
+    if [[ -n "$HAVE_INPUTS" ]]; then
+        if [[ -x "${SCHRODINGER}/run" ]]; then
+            GEN_CMD=(bash "${PIPELINE_ROOT}/scripts/generate_systems.sh")
+            if [[ -n "$MANIFEST" ]]; then
+                GEN_CMD+=(--manifest "$MANIFEST")
+            else
+                GEN_CMD+=(--input-dir "$INPUT_DIR")
+            fi
+            if (( ${#GEN_ARGS[@]} > 0 )); then
+                GEN_CMD+=("${GEN_ARGS[@]}")
+            fi
+            SYS_RAN="yes"
+            SYS_RC=0
+            env SCH_WORK_ROOT="$SCH_WORK_ROOT" SCHRODINGER="$SCHRODINGER" \
+                "${GEN_CMD[@]}" || SYS_RC=$?
+        else
+            warn "Schrodinger not found at ${SCHRODINGER}; skipping system config generation (use --no-systems to silence)"
+        fi
+    else
+        echo "No .pdb/.mae/.maegz found in ${INPUT_DIR}; system generation skipped."
     fi
 fi
 
@@ -307,7 +516,7 @@ if [[ "$BASHRC_OK" == "yes" ]]; then
     echo "Shell setup:"
     echo "  Updated ${BASHRC} (managed block):"
     printf "    export SCH_WORK_ROOT='%s'  (only when it is not already set)\n" "$SCH_WORK_ROOT"
-    echo "    aliases: desmond-init desmond-check desmond-smoke desmond-submit desmond-batch desmond-status desmond-results"
+    echo "    aliases: desmond-init desmond-check desmond-smoke desmond-submit desmond-batch desmond-status desmond-results desmond-systems"
     echo "  For the current shell:"
     if [[ -n "$CALLER_SCH_WORK_ROOT" && "$CALLER_SCH_WORK_ROOT" != "$SCH_WORK_ROOT" ]]; then
         echo "    unset SCH_WORK_ROOT && source ${BASHRC}"
@@ -327,15 +536,41 @@ else
 fi
 echo
 echo "Next steps:"
-echo "  1) Edit ${SCH_WORK_ROOT}/systems/example.conf (input path + ASLs)."
-if [[ "$BASHRC_OK" == "yes" ]]; then
-    echo "  2) desmond-check"
-    echo "  3) desmond-smoke"
-    echo "  4) desmond-submit ${SCH_WORK_ROOT}/systems/example.conf"
-    echo "  5) desmond-status example"
+if [[ "$SYS_RAN" == "yes" && "$SYS_RC" == "0" ]]; then
+    if [[ "$SYS_DRY" == "yes" ]]; then
+        echo "  1) Dry run only; re-run init_user.sh without --dry-run (or run desmond-systems) to write configs."
+    else
+        echo "  1) Review generated configs in ${SCH_WORK_ROOT}/systems/."
+    fi
+    if [[ "$BASHRC_OK" == "yes" ]]; then
+        echo "  2) desmond-check"
+        echo "  3) desmond-smoke"
+        echo "  4) desmond-batch ${SCH_WORK_ROOT}/systems/"
+        echo "  5) desmond-status"
+    else
+        echo "  2) ${PIPELINE_ROOT}/scripts/check_env.sh"
+        echo "  3) ${PIPELINE_ROOT}/scripts/submit_smoke.sh"
+        echo "  4) ${PIPELINE_ROOT}/scripts/submit_batch.sh ${SCH_WORK_ROOT}/systems/"
+        echo "  5) ${PIPELINE_ROOT}/scripts/status.sh"
+    fi
+    echo "     (example.conf and gda10_pilot.conf are templates; edit or remove"
+    echo "      them before submitting the whole systems/ directory.)"
 else
-    echo "  2) ${PIPELINE_ROOT}/scripts/check_env.sh"
-    echo "  3) ${PIPELINE_ROOT}/scripts/submit_smoke.sh"
-    echo "  4) ${PIPELINE_ROOT}/scripts/submit_system.sh ${SCH_WORK_ROOT}/systems/example.conf"
-    echo "  5) ${PIPELINE_ROOT}/scripts/status.sh example"
+    echo "  1) Edit ${SCH_WORK_ROOT}/systems/example.conf (input path + ASLs)."
+    if [[ "$BASHRC_OK" == "yes" ]]; then
+        echo "  2) desmond-check"
+        echo "  3) desmond-smoke"
+        echo "  4) desmond-submit ${SCH_WORK_ROOT}/systems/example.conf"
+        echo "  5) desmond-status example"
+    else
+        echo "  2) ${PIPELINE_ROOT}/scripts/check_env.sh"
+        echo "  3) ${PIPELINE_ROOT}/scripts/submit_smoke.sh"
+        echo "  4) ${PIPELINE_ROOT}/scripts/submit_system.sh ${SCH_WORK_ROOT}/systems/example.conf"
+        echo "  5) ${PIPELINE_ROOT}/scripts/status.sh example"
+    fi
 fi
+if [[ "$SYS_RC" != "0" ]]; then
+    echo
+    echo "WARNING: system generation had failures; fix the input structures and re-run desmond-systems."
+fi
+exit "$SYS_RC"

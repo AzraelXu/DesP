@@ -198,4 +198,129 @@ assert_eq 0 "$rc" "explicit env exit"
 assert_file_exists "$target12/.desmond_work_root"
 assert_contains "$(cat "$h12/.bashrc")" "export SCH_WORK_ROOT='$target12'" "explicit env export"
 
+# ---------------------------------------------------------------------------
+# Batch generation during init (fake Schrodinger, no real structures).
+# ---------------------------------------------------------------------------
+FAKE_PYTHON="$(command -v python3 || true)"
+if [[ -n "$FAKE_PYTHON" ]]; then
+    FAKE_SCHRODINGER="$SANDBOX/fake-schrodinger"
+    mkdir -p "$FAKE_SCHRODINGER"
+    cp "$REPO_ROOT/tests/fixtures/fake_schrodinger/run" "$FAKE_SCHRODINGER/run"
+    chmod +x "$FAKE_SCHRODINGER/run"
+    REPORT_HELPER="$REPO_ROOT/tests/fixtures/make_structure_report.py"
+
+    hgen="$(fresh_home hgen)"
+    wgen="$SANDBOX/wgen"
+    mkdir -p "$wgen"
+    printf 'placeholder\n' > "$wgen/pdc1.mae"
+    reports="$SANDBOX/reports-gen"
+    mkdir -p "$reports"
+    "$FAKE_PYTHON" "$REPORT_HELPER" "$reports/pdc1.mae.json" \
+        "ligand=B;resname=UNK;atoms=10;receptor=A"
+    out="$(INIT_HOME="$hgen" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$wgen" --force)"
+    rc=$?
+    assert_eq 0 "$rc" "init batch generation exit"
+    assert_file_exists "$wgen/systems/pdc1.conf"
+    assert_contains "$out" "desmond-systems" "desmond-systems alias output"
+    assert_contains "$(cat "$hgen/.bashrc")" "desmond-systems" "desmond-systems in bashrc"
+
+    wno="$SANDBOX/wno"
+    mkdir -p "$wno"
+    printf 'placeholder\n' > "$wno/pdc1.mae"
+    out="$(INIT_HOME="$hgen" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$wno" --force --no-systems)"
+    rc=$?
+    assert_eq 0 "$rc" "init --no-systems exit"
+    assert_not_exists "$wno/systems/pdc1.conf"
+
+    wbad="$SANDBOX/wbad"
+    mkdir -p "$wbad"
+    printf 'placeholder\n' > "$wbad/pdc1.mae"
+    printf 'placeholder\n' > "$wbad/pdc2.mae"
+    reports_bad="$SANDBOX/reports-bad"
+    mkdir -p "$reports_bad"
+    "$FAKE_PYTHON" "$REPORT_HELPER" "$reports_bad/pdc1.mae.json" \
+        "ligand=B;receptor=A"
+    "$FAKE_PYTHON" "$REPORT_HELPER" "$reports_bad/pdc2.mae.json" \
+        "ligand=C;receptor=A"
+    out="$(INIT_HOME="$hgen" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports_bad" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$wbad" --force)"
+    rc=$?
+    assert_eq 1 "$rc" "init chain mismatch exit"
+    assert_file_exists "$wbad/.desmond_work_root"
+    assert_not_exists "$wbad/systems/pdc1.conf"
+    assert_contains "$out" "not consistent" "init chain mismatch message"
+
+    wmissing="$SANDBOX/wmissing"
+    mkdir -p "$wmissing"
+    printf 'placeholder\n' > "$wmissing/pdc1.mae"
+    out="$(INIT_HOME="$hgen" INIT_SCHRODINGER="$SANDBOX/no-schrodinger" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$wmissing" --force)"
+    rc=$?
+    assert_eq 0 "$rc" "init missing Schrodinger exit"
+    assert_contains "$out" "Schrodinger not found" "init missing Schrodinger warning"
+    assert_not_exists "$wmissing/systems/pdc1.conf"
+
+    hext="$(fresh_home hext)"
+    winput="$SANDBOX/ext-inputs"
+    wroot="$SANDBOX/ext-root"
+    mkdir -p "$winput"
+    printf 'placeholder\n' > "$winput/pdc1.mae"
+    out="$(INIT_HOME="$hext" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$winput" --work-root "$wroot" --force)"
+    rc=$?
+    assert_eq 0 "$rc" "init external work-root exit"
+    assert_file_exists "$wroot/systems/pdc1.conf"
+    assert_not_exists "$winput/systems/pdc1.conf"
+
+    # A symlinked --input-dir must still be scanned (find -H).
+    hlink="$(fresh_home hlink)"
+    link_real="$SANDBOX/link-real"
+    link_path="$SANDBOX/link-inputs"
+    link_work="$SANDBOX/link-work"
+    mkdir -p "$link_real" "$link_work"
+    printf 'placeholder\n' > "$link_real/pdc1.mae"
+    ln -s "$link_real" "$link_path"
+    out="$(INIT_HOME="$hlink" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$link_work" --force --input-dir "$link_path")"
+    rc=$?
+    assert_eq 0 "$rc" "init symlinked input-dir exit"
+    assert_file_exists "$link_work/systems/pdc1.conf"
+
+    # Hidden structure files are found in recursive mode.
+    hhidden="$(fresh_home hhidden)"
+    hidden_input="$SANDBOX/hidden-inputs"
+    hidden_work="$SANDBOX/hidden-work"
+    mkdir -p "$hidden_input/sub" "$hidden_work"
+    printf 'placeholder\n' > "$hidden_input/sub/.hidden.mae"
+    "$FAKE_PYTHON" "$REPORT_HELPER" "$reports/.hidden.mae.json" \
+        "ligand=B;resname=UNK;atoms=10;receptor=A"
+    out="$(INIT_HOME="$hhidden" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$hidden_work" --force --recursive --input-dir "$hidden_input")"
+    rc=$?
+    assert_eq 0 "$rc" "init recursive hidden exit"
+    assert_file_exists "$hidden_work/systems/hidden.conf"
+
+    # Invalid generation arguments are rejected before creating the layout.
+    hcheck="$(fresh_home hcheck)"
+    wcheck="$SANDBOX/wcheck"
+    mkdir -p "$wcheck"
+    printf 'placeholder\n' > "$wcheck/pdc1.mae"
+    out="$(INIT_HOME="$hcheck" INIT_SCHRODINGER="$FAKE_SCHRODINGER" \
+        INIT_FAKE_INSPECT_DIR="$reports" INIT_FAKE_PYTHON="$FAKE_PYTHON" \
+        run_init "$wcheck" --force --ligand-chain 'A:B')"
+    rc=$?
+    assert_eq 2 "$rc" "init invalid generation arg exit"
+    assert_not_exists "$wcheck/.desmond_work_root"
+    assert_not_exists "$wcheck/systems"
+fi
+
 finish

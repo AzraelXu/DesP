@@ -1,0 +1,126 @@
+#!/bin/bash
+# Fake $SCHRODINGER/run for the batch-system tests.
+#
+#   run python3 generate_systems.py [args...]
+#       Executes the real generator with FAKE_PYTHON (default: python3).
+#
+#   run python3 inspect_structure.py --structure F [--json-out J] [--check] ...
+#       Copies $FAKE_INSPECT_DIR/<basename F>.json to J. If --check is given,
+#       fails when <basename F>.check_fail exists. Unknown flags are ignored.
+set -euo pipefail
+
+[[ $# -ge 1 ]] || { echo "fake run: missing interpreter" >&2; exit 2; }
+interpreter="$1"
+shift
+[[ "$interpreter" == "python3" ]] || {
+    echo "fake run: unsupported interpreter: $interpreter" >&2
+    exit 2
+}
+[[ $# -ge 1 ]] || { echo "fake run: missing script" >&2; exit 2; }
+script="$1"
+shift
+
+case "$(basename "$script")" in
+    generate_systems.py)
+        exec "${FAKE_PYTHON:-python3}" "$script" "$@"
+        ;;
+    inspect_structure.py)
+        ;;
+    *)
+        echo "fake run: unsupported script: $script" >&2
+        exit 2
+        ;;
+esac
+
+structure=""
+json_out=""
+check="no"
+receptor_asl=""
+ligand_asl=""
+align_asl=""
+while (( $# > 0 )); do
+    case "$1" in
+        --structure)
+            [[ $# -ge 2 ]] || { echo "fake inspect: --structure needs a value" >&2; exit 2; }
+            structure="$2"
+            shift 2
+            ;;
+        --json-out)
+            [[ $# -ge 2 ]] || { echo "fake inspect: --json-out needs a value" >&2; exit 2; }
+            json_out="$2"
+            shift 2
+            ;;
+        --check)
+            check="yes"
+            shift
+            ;;
+        --receptor-asl)
+            [[ $# -ge 2 ]] || { echo "fake inspect: --receptor-asl needs a value" >&2; exit 2; }
+            receptor_asl="$2"
+            shift 2
+            ;;
+        --ligand-asl)
+            [[ $# -ge 2 ]] || { echo "fake inspect: --ligand-asl needs a value" >&2; exit 2; }
+            ligand_asl="$2"
+            shift 2
+            ;;
+        --align-asl)
+            [[ $# -ge 2 ]] || { echo "fake inspect: --align-asl needs a value" >&2; exit 2; }
+            align_asl="$2"
+            shift 2
+            ;;
+        *)
+            echo "fake inspect: unexpected argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+[[ -n "$structure" ]] || { echo "fake inspect: missing --structure" >&2; exit 1; }
+[[ -n "${FAKE_INSPECT_DIR:-}" ]] || {
+    echo "fake inspect: FAKE_INSPECT_DIR is not set" >&2
+    exit 1
+}
+
+base="$(basename "$structure")"
+report="${FAKE_INSPECT_DIR}/${base}.json"
+
+if [[ "$check" == "yes" ]]; then
+    [[ -n "$receptor_asl" && -n "$ligand_asl" && -n "$align_asl" ]] || {
+        echo "fake inspect: --check requires --receptor-asl, --ligand-asl, and --align-asl" >&2
+        exit 2
+    }
+    if [[ -n "${FAKE_INSPECT_LOG:-}" ]]; then
+        printf '%s|%s|%s|%s|check\n' "$base" "$receptor_asl" "$ligand_asl" "$align_asl" \
+            >> "$FAKE_INSPECT_LOG"
+    fi
+    if [[ -f "${FAKE_INSPECT_DIR}/${base}.check_fail" ]]; then
+        echo "fake inspect: ASL check failed for ${base}" >&2
+        exit 1
+    fi
+    if [[ -n "$json_out" ]]; then
+        [[ -f "$report" ]] || {
+            echo "fake inspect: report not found: ${report}" >&2
+            exit 1
+        }
+        cp "$report" "$json_out"
+    else
+        echo "fake inspect: ASL check ok for ${base}"
+    fi
+    exit 0
+fi
+
+[[ -f "$report" ]] || {
+    echo "fake inspect: report not found: ${report}" >&2
+    exit 1
+}
+if [[ -n "${FAKE_INSPECT_LOG:-}" ]]; then
+    printf '%s|%s|%s|%s|json\n' "$base" "$receptor_asl" "$ligand_asl" "$align_asl" \
+        >> "$FAKE_INSPECT_LOG"
+fi
+if [[ -n "$json_out" ]]; then
+    cp "$report" "$json_out"
+else
+    echo "Structure: ${structure}"
+fi
+exit 0
