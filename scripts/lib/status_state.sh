@@ -784,3 +784,13 @@ compute_states() {
     fi
 }
 
+# Load one project's frozen config, jobs state, and computed stage states.
+# Callers use this to decide whether a complete project was already reported
+# before printing its block.
+evaluate_project() {
+    local pdir="$1"
+    load_frozen "$pdir"
+    load_jobs "$pdir"
+    compute_states "$pdir"
+}
+

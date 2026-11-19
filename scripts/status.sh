@@ -2,7 +2,7 @@
 # Project-centric status: current stage, ETA, and warnings/errors from the
 # current run. This intentionally does not print the full PBS queue or
 # node/GPU tables; use qstat/pbsnodes for that.
-# Usage: status.sh [SYSTEM_NAME | PROJECT_DIR]
+# Usage: status.sh [--all] [SYSTEM_NAME | PROJECT_DIR]
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +40,7 @@ declare -A PROJECT_SEEN=()
 PROJECT_RESULT=""
 CURRENT_STAGES=()
 STAGE_TOTAL=0
+SHOW_ALL="no"
 
 # Frozen configuration fields.
 F_SYSTEM_NAME=""
@@ -90,15 +91,20 @@ MD_LOG=""
 
 source "${PIPELINE_ROOT}/scripts/lib/status_state.sh"
 source "${PIPELINE_ROOT}/scripts/lib/status_report.sh"
+source "${PIPELINE_ROOT}/scripts/lib/status_reported.sh"
 
 status_usage() {
     cat <<'EOF'
-Usage: status.sh [SYSTEM_NAME | PROJECT_DIR]
+Usage: status.sh [--all] [SYSTEM_NAME | PROJECT_DIR]
 
 For each initialized project, show:
   - the current stage and its PBS state,
   - elapsed time and ETA (MD uses chemical time + ns/day),
   - warnings/errors recorded in the current run.
+
+A completed project is reported in full only once by the no-argument scan.
+Later scans hide it and print a one-line summary; use --all (or name the
+project explicitly) to show it again. A new submission is reported again.
 
 The full PBS queue and node/GPU tables are deliberately omitted; use qstat
 or pbsnodes if you need them.
@@ -106,15 +112,36 @@ EOF
 }
 
 main() {
-    local arg="${1:-}"
-    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-        status_usage
-        exit 0
-    fi
-    if (( $# > 1 )); then
-        status_usage
-        printf 'Only one project argument is allowed.\n' >&2
-        exit 2
+    local arg=""
+    local is_explicit="no"
+    while (( $# > 0 )); do
+        case "$1" in
+            -h|--help)
+                status_usage
+                exit 0
+                ;;
+            --all)
+                SHOW_ALL="yes"
+                shift
+                ;;
+            -*)
+                status_usage
+                printf 'Unknown option: %s\n' "$1" >&2
+                exit 2
+                ;;
+            *)
+                if [[ -n "$arg" ]]; then
+                    status_usage
+                    printf 'Only one project argument is allowed.\n' >&2
+                    exit 2
+                fi
+                arg="$1"
+                shift
+                ;;
+        esac
+    done
+    if [[ -n "$arg" ]]; then
+        is_explicit="yes"
     fi
 
     if ! command -v "$QSTAT" >/dev/null 2>&1; then
@@ -135,11 +162,36 @@ main() {
     fi
     mapfile -t PROJECTS < <(printf '%s\n' "${PROJECTS[@]}" | LC_ALL=C sort)
 
-    local i
-    for ((i = 0; i < ${#PROJECTS[@]}; i++)); do
-        (( i > 0 )) && echo
-        print_project "${PROJECTS[$i]}"
+    local pdir shown=0 hidden=0
+    for pdir in "${PROJECTS[@]}"; do
+        evaluate_project "$pdir"
+        if [[ "$SHOW_ALL" != "yes" && "$is_explicit" != "yes" \
+              && "$PROJECT_RESULT" == "complete" ]] \
+              && project_already_reported "$pdir" "${J_RUN_ID:-}"; then
+            hidden=$((hidden + 1))
+            continue
+        fi
+        if (( shown > 0 )); then
+            echo
+        fi
+        print_project "$pdir"
+        shown=$((shown + 1))
+        if [[ "$PROJECT_RESULT" == "complete" ]] \
+              && ! project_already_reported "$pdir" "${J_RUN_ID:-}"; then
+            if ! mark_project_reported "$pdir" "${J_RUN_ID:-}" \
+                    "${F_SYSTEM_NAME:-$(basename "$pdir")}"; then
+                printf 'Note: cannot record status report state in %s\n' \
+                    "$pdir/state" >&2
+            fi
+        fi
     done
+    if (( hidden > 0 )); then
+        if (( shown > 0 )); then
+            echo
+        fi
+        printf '%d completed project(s) already reported (use --all to show)\n' "$hidden"
+    fi
+    return 0
 }
 
 main "$@"

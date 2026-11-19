@@ -138,6 +138,13 @@ assert_contains "$out" "minimization failed" "FATAL text"
 assert_contains "$out" "error: force field problem" "PBS tail"
 assert_contains "$out" "===== stage 30_min start =====" "stage log tail"
 
+# Failed projects are never hidden by the reported-complete state.
+out="$(run_status "$work2")"
+assert_contains "$out" "Project : f" "failed project shown in no-arg scan"
+out="$(run_status "$work2")"
+assert_contains "$out" "Project : f" "failed project never hidden"
+assert_not_exists "$f/state/status_reported.env"
+
 # ---------------------------------------------------------------------------
 # Complete project: only the current run's warnings are shown.
 # ---------------------------------------------------------------------------
@@ -266,5 +273,136 @@ out="$(run_status "$work9")"
 assert_contains "$out" "Project : a" "scan project a"
 assert_contains "$out" "Project : b" "scan project b"
 assert_not_contains "$out" "Project : empty" "scan skips non-project directories"
+
+# ---------------------------------------------------------------------------
+# Completed projects are reported once by the no-argument scan.
+# ---------------------------------------------------------------------------
+reset_status_state
+work10="$SANDBOX/work10"
+r="$work10/projects/r"
+make_project "$r" r
+write_jobs_env "$r" run1 "$submitted"
+for s in prepwizard setup min md analysis mmgbsa; do
+    write_done "$r" "$s" 991 run1 "$submitted" "$(ts $((now - 1000)))"
+done
+printf '# MM-GBSA\nMean dG_bind = -10.0 kcal/mol\n' > "$r/results/mmgbsa_summary.md"
+live="$work10/projects/live"
+make_project "$live" live
+
+out="$(run_status "$work10")"
+assert_contains "$out" "Project : r" "first scan reports completed project"
+assert_contains "$out" "Project : live" "first scan reports active project"
+assert_file_exists "$r/state/status_reported.env"
+assert_contains "$(cat "$r/state/status_reported.env")" "RUN_ID=run1" "marker records run id"
+
+out="$(run_status "$work10")"
+assert_not_contains "$out" "Project : r" "second scan hides reported project"
+assert_contains "$out" "Project : live" "second scan still shows active project"
+assert_contains "$out" "1 completed project(s) already reported (use --all to show)" \
+    "hidden completed summary"
+
+out="$(run_status "$work10" --all)"
+assert_contains "$out" "Project : r" "--all shows reported project"
+
+out="$(run_status "$work10" r)"
+assert_contains "$out" "Project : r" "explicit project shows reported project"
+assert_contains "$out" "Step    : complete (6/6)" "explicit project complete"
+
+# A new submission (new RUN_ID) is reported once again.
+write_jobs_env "$r" run2 "$submitted"
+for s in prepwizard setup min md analysis mmgbsa; do
+    write_done "$r" "$s" 992 run2 "$submitted" "$(ts $((now - 1000)))"
+done
+out="$(run_status "$work10")"
+assert_contains "$out" "Project : r" "new run reappears"
+assert_contains "$out" "Run     : run2" "new run id shown"
+out="$(run_status "$work10")"
+assert_not_contains "$out" "Project : r" "new run reported once"
+
+# ---------------------------------------------------------------------------
+# --all first: creates the marker; a later scan hides the project.
+# ---------------------------------------------------------------------------
+reset_status_state
+work11="$SANDBOX/work11"
+x="$work11/projects/x"
+make_project "$x" x
+write_jobs_env "$x" run1 "$submitted"
+for s in prepwizard setup min md analysis mmgbsa; do
+    write_done "$x" "$s" 991 run1 "$submitted" "$(ts $((now - 1000)))"
+done
+out="$(run_status "$work11" --all)"
+assert_contains "$out" "Project : x" "--all prints completed project"
+assert_file_exists "$x/state/status_reported.env"
+out="$(run_status "$work11")"
+assert_not_contains "$out" "Project : x" "scan after --all hides report"
+
+# ---------------------------------------------------------------------------
+# Marker write failure must not break status output.
+# ---------------------------------------------------------------------------
+reset_status_state
+work12="$SANDBOX/work12"
+u="$work12/projects/u"
+make_project "$u" u
+write_jobs_env "$u" run1 "$submitted"
+for s in prepwizard setup min md analysis mmgbsa; do
+    write_done "$u" "$s" 991 run1 "$submitted" "$(ts $((now - 1000)))"
+done
+if (( EUID == 0 )); then
+    pass
+else
+    chmod 555 "$u/state"
+    errfile="$SANDBOX/err12.txt"
+    rc=0
+    out="$(run_status "$work12" 2>"$errfile")" || rc=$?
+    chmod 755 "$u/state"
+    assert_eq 0 "$rc" "unwritable state exit code"
+    assert_contains "$out" "Step    : complete (6/6)" "unwritable state keeps output"
+    assert_contains "$(cat "$errfile")" "Note: cannot record status report state" \
+        "unwritable state warning"
+fi
+
+# ---------------------------------------------------------------------------
+# Legacy complete project without jobs.env (empty RUN_ID) and damaged markers.
+# ---------------------------------------------------------------------------
+reset_status_state
+work13="$SANDBOX/work13"
+lg="$work13/projects/legacy"
+make_project "$lg" legacy
+for s in prepwizard setup min md analysis mmgbsa; do
+    write_done "$lg" "$s" 991 "" "2026-01-01 00:00:00" "2026-01-01 01:00:00"
+done
+out="$(run_status "$work13")"
+assert_contains "$out" "Project : legacy" "legacy complete shown first"
+assert_contains "$out" "Step    : complete (6/6)" "legacy complete detected"
+assert_file_exists "$lg/state/status_reported.env"
+out="$(run_status "$work13")"
+assert_not_contains "$out" "Project : legacy" "legacy empty run id hidden after report"
+
+printf 'PROJECT=legacy\n' > "$lg/state/status_reported.env"
+out="$(run_status "$work13")"
+assert_contains "$out" "Project : legacy" "marker without RUN_ID is not reported"
+: > "$lg/state/status_reported.env"
+out="$(run_status "$work13")"
+assert_contains "$out" "Project : legacy" "empty marker is not reported"
+out="$(run_status "$work13")"
+assert_not_contains "$out" "Project : legacy" "rewritten legacy marker hides again"
+assert_contains "$out" "1 completed project(s) already reported (use --all to show)" \
+    "summary only when all projects are hidden"
+
+# ---------------------------------------------------------------------------
+# Argument validation.
+# ---------------------------------------------------------------------------
+reset_status_state
+rc=0
+run_status "$work13" --bogus >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc" "unknown option exit code"
+rc=0
+run_status "$work13" a b >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc" "two positional args exit code"
+
+emptyw="$SANDBOX/empty-work"
+mkdir -p "$emptyw"
+out="$(run_status "$emptyw" --all)"
+assert_contains "$out" "No initialized projects" "--all with no projects"
 
 finish

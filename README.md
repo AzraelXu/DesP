@@ -322,7 +322,7 @@ PBS 可通过 `PBS_GPUFILE` 和/或 `CUDA_VISIBLE_DEVICES` 告知作业分配到
 │   ├── submit_batch.sh          多体系批量提交
 │   ├── submit_smoke.sh          GPU/license/环境冒烟
 │   ├── check_env.sh             登录节点环境检查
-│   ├── status.sh                当前阶段 / ETA / 本 run WARN-FATAL
+│   ├── status.sh                当前阶段 / ETA / 本 run WARN-FATAL；完成项目只提醒一次
 │   ├── collect_results.sh       汇总 RMSD 图与 MM-GBSA 表
 │   ├── init_user.sh             初始化工作区 + ~/.bashrc + 自动生成体系
 │   ├── generate_systems.sh      批量生成 systems/*.conf（wrapper）
@@ -829,4 +829,4 @@ qstat -f <jobid>
 
 ---
 
-*最后更新：2026-11-16*
+*最后更新：2026-11-19*

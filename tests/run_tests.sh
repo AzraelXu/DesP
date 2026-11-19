@@ -10,6 +10,7 @@ fail=0
 echo "== Syntax checks =="
 for f in config.sh scripts/lib/common.sh scripts/lib/bashrc.sh \
          scripts/lib/status_state.sh scripts/lib/status_report.sh \
+         scripts/lib/status_reported.sh \
          scripts/init_user.sh scripts/status.sh scripts/generate_systems.sh \
          tests/fixtures/fake_schrodinger/run; do
     if bash -n "$f"; then
@@ -38,6 +39,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     echo "== shellcheck (errors only; informational) =="
     for f in config.sh scripts/lib/common.sh scripts/lib/bashrc.sh \
              scripts/lib/status_state.sh scripts/lib/status_report.sh \
+             scripts/lib/status_reported.sh \
              scripts/init_user.sh scripts/status.sh scripts/generate_systems.sh; do
         shellcheck -S error -x "$f" || true
     done

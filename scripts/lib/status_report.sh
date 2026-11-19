@@ -218,11 +218,10 @@ print_failure_context() {
     fi
 }
 
+# Print one project block. The caller must run evaluate_project first; this
+# function only formats the already-computed state.
 print_project() {
     local pdir="$1"
-    load_frozen "$pdir"
-    load_jobs "$pdir"
-    compute_states "$pdir"
 
     local name="${F_SYSTEM_NAME:-$(basename "$pdir")}"
     echo "Project : ${name}"

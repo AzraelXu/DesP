@@ -193,6 +193,9 @@ Errors  : none
 - 失败阶段会显示 `FAILED`、`Blocked : ...` 以及 PBS/阶段日志尾部。
 - 无参数时扫描 `$SCH_WORK_ROOT/projects/` 下所有项目；参数也可以是项目目录
   绝对路径。
+- 无参数扫描时，已完成项目只完整显示一次；之后只保留一行
+  `N completed project(s) already reported` 汇总。`--all` 或显式指定项目
+  可重新查看完整状态；重新提交（新 `RUN_ID`）后会再次提醒一次。
 
 提交必须在**登录节点**执行；脚本检测到 `PBS_JOBID` 会拒绝。smoke 输出在
 `$SCH_WORK_ROOT/projects/_smoke/`。
@@ -265,4 +268,4 @@ queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS
 
 ---
 
-*最后更新：2026-11-16*
+*最后更新：2026-11-19*

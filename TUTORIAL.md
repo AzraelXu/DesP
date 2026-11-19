@@ -461,7 +461,10 @@ qstat -f -1 <jobid> | grep -E 'job_state|resources_used|comment'
 `status.sh` 只显示项目级信息：当前阶段、已运行时间、可估算的 ETA（MD 用
 chemical time + 最近 10 个 `ns/day` 的平均值），以及当前 run 的 WARN/FATAL。
 它不再打印完整队列和节点/GPU 表。参数可以是体系名或项目目录绝对路径；不带
-参数时扫描 `$SCH_WORK_ROOT/projects/` 下所有项目。
+参数时扫描 `$SCH_WORK_ROOT/projects/` 下所有项目。无参数扫描中，已完成项目
+只在首次完整显示一次；之后只保留一行 `N completed project(s) already
+reported` 汇总，`--all` 或显式指定项目可重新查看。重新提交（新 `RUN_ID`）
+后会再次提醒一次。
 
 示例（MD 运行中）：
 
@@ -759,6 +762,7 @@ desmond-smoke
 desmond-submit "$SCH_WORK_ROOT/systems/foo.conf" --dry-run
 desmond-submit "$SCH_WORK_ROOT/systems/foo.conf"
 desmond-status foo
+desmond-status --all
 desmond-results
 ```
 
@@ -867,6 +871,12 @@ queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS
 是的。需要时手动运行 `qstat -u "$USER"`、`pbsnodes -a` 或
 `qstat -f -1 <jobid>`。
 
+**Q20：为什么 `status.sh` 不再显示已经完成的项目？**
+无参数扫描把“完成”当作一次性提醒：首次完整显示后会在项目 `state/` 下记录
+`status_reported.env`，之后只保留一行汇总。运行中、失败和未提交的项目始终
+显示；重新提交后 `RUN_ID` 变化，会再次提醒一次。需要随时查看已完成项目时用
+`desmond-status --all` 或 `desmond-status <项目名>`。
+
 ---
 
 ## 14. 共享安装使用规则
@@ -878,4 +888,4 @@ queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS
 
 ---
 
-*最后更新：2026-11-16*
+*最后更新：2026-11-19*
