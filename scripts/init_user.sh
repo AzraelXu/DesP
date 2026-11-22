@@ -11,9 +11,10 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 INVOCATION_DIR="$(pwd -P 2>/dev/null || printf '%s' "${PWD:-}")"
 source "${PIPELINE_ROOT}/scripts/lib/bashrc.sh"
+source "${PIPELINE_ROOT}/scripts/lib/ui.sh"
 
-die()  { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'WARNING: %s\n' "$*" >&2; }
+die()  { fatal "$*"; exit 1; }
+warn() { ui_emit WARN "WARNING: $*"; }
 
 usage() {
     cat <<'EOF'
@@ -21,9 +22,10 @@ Usage: init_user.sh [options]
 
 Options:
   --work-root DIR   Use DIR as the work root (default: current directory).
-  --force           Allow unsafe locations (pipeline source tree, $HOME, /,
+  -f, --force       Allow unsafe locations (pipeline source tree, $HOME, /,
                     /tmp) and replace a ~/.bashrc block that points elsewhere.
   --no-bashrc       Do not modify ~/.bashrc.
+  --color MODE      Color output: auto (default), always, or never.
   -h, --help        Show this help.
 
 System generation (runs after the work root is created):
@@ -63,6 +65,9 @@ managed ~/.bashrc block. If DIR is not writable, $HOME/desmond_md_work is used.
 EOF
 }
 
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
 WORK_ROOT_ARG=""
 FORCE="no"
 NO_BASHRC="no"
@@ -84,7 +89,7 @@ while (( $# > 0 )); do
             WORK_ROOT_ARG="$2"
             shift 2
             ;;
-        --force)
+        -f|--force)
             FORCE="yes"
             shift
             ;;
@@ -499,18 +504,19 @@ fi
 # ---------------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------------
-echo "Work root : ${SCH_WORK_ROOT}  (${SOURCE})"
-echo "Marker    : ${SCH_WORK_ROOT}/.desmond_work_root"
-echo "Systems   : ${SCH_WORK_ROOT}/systems"
-echo "Projects  : ${SCH_WORK_ROOT}/projects"
-echo "Results   : ${SCH_WORK_ROOT}/results"
-echo "GPU locks : ${GPU_LOCK_DIR}"
+ui_kv "Work root" "${SCH_WORK_ROOT}  (${SOURCE})"
+ui_kv "Marker" "${SCH_WORK_ROOT}/.desmond_work_root"
+ui_kv "Systems" "${SCH_WORK_ROOT}/systems"
+ui_kv "Projects" "${SCH_WORK_ROOT}/projects"
+ui_kv "Results" "${SCH_WORK_ROOT}/results"
+ui_kv "GPU locks" "${GPU_LOCK_DIR}"
 echo
 
 if [[ "$BASHRC_OK" == "yes" ]]; then
-    echo "Shell setup:"
+    header "Shell setup:"
     echo "  Updated ${BASHRC} (managed block):"
-    printf "    export SCH_WORK_ROOT='%s'  (only when it is not already set)\n" "$SCH_WORK_ROOT"
+    printf "    export SCH_WORK_ROOT='%s'  " "$SCH_WORK_ROOT"
+    debug "(only when it is not already set)"
     echo "    aliases: desmond-init desmond-check desmond-smoke desmond-submit desmond-batch desmond-status desmond-results desmond-systems"
     echo "  For the current shell:"
     if [[ -n "$CALLER_SCH_WORK_ROOT" && "$CALLER_SCH_WORK_ROOT" != "$SCH_WORK_ROOT" ]]; then
@@ -520,7 +526,7 @@ if [[ "$BASHRC_OK" == "yes" ]]; then
     fi
     echo "  New interactive shells pick this up automatically."
 else
-    echo "Shell setup (manual):"
+    header "Shell setup (manual):"
     printf '  export SCH_WORK_ROOT=%q\n' "$SCH_WORK_ROOT"
     _pair=""
     for _pair in "${ALIASES[@]}"; do
@@ -530,42 +536,44 @@ else
     echo "  absolute script paths or an exported SCH_WORK_ROOT."
 fi
 echo
-echo "Next steps:"
+_steps=()
 if [[ "$SYS_RAN" == "yes" && "$SYS_RC" == "0" ]]; then
     if [[ "$SYS_DRY" == "yes" ]]; then
-        echo "  1) Dry run only; re-run init_user.sh without --dry-run (or run desmond-systems) to write configs."
+        _steps+=("Dry run only; re-run init_user.sh without --dry-run (or run desmond-systems) to write configs.")
     else
-        echo "  1) Review generated configs in ${SCH_WORK_ROOT}/systems/."
+        _steps+=("Review generated configs in ${SCH_WORK_ROOT}/systems/.")
     fi
     if [[ "$BASHRC_OK" == "yes" ]]; then
-        echo "  2) desmond-check"
-        echo "  3) desmond-smoke"
-        echo "  4) desmond-batch ${SCH_WORK_ROOT}/systems/"
-        echo "  5) desmond-status"
+        _steps+=("desmond-batch ${SCH_WORK_ROOT}/systems/")
+        _steps+=("desmond-status")
+        _steps+=("desmond-results")
     else
-        echo "  2) ${PIPELINE_ROOT}/scripts/check_env.sh"
-        echo "  3) ${PIPELINE_ROOT}/scripts/submit_smoke.sh"
-        echo "  4) ${PIPELINE_ROOT}/scripts/submit_batch.sh ${SCH_WORK_ROOT}/systems/"
-        echo "  5) ${PIPELINE_ROOT}/scripts/status.sh"
+        _steps+=("${PIPELINE_ROOT}/scripts/submit_batch.sh ${SCH_WORK_ROOT}/systems/")
+        _steps+=("${PIPELINE_ROOT}/scripts/status.sh")
+        _steps+=("${PIPELINE_ROOT}/scripts/collect_results.sh")
     fi
-    echo "     (example.conf is a template; directory batch submission skips it"
-    echo "      by default. Pass it explicitly if you really need to run it.)"
+    next_steps ok "${_steps[@]}" \
+        --footer-line "(example.conf is a template; directory batch submission skips it" \
+        --footer-line "by default. Pass it explicitly if you really need to run it.)"
 else
-    echo "  1) Edit ${SCH_WORK_ROOT}/systems/example.conf (input path + ASLs)."
+    _steps+=("Edit ${SCH_WORK_ROOT}/systems/example.conf (input path + ASLs).")
     if [[ "$BASHRC_OK" == "yes" ]]; then
-        echo "  2) desmond-check"
-        echo "  3) desmond-smoke"
-        echo "  4) desmond-submit ${SCH_WORK_ROOT}/systems/example.conf"
-        echo "  5) desmond-status example"
+        _steps+=("desmond-check")
+        _steps+=("desmond-smoke")
+        _steps+=("desmond-submit ${SCH_WORK_ROOT}/systems/example.conf")
+        _steps+=("desmond-status example")
+        _steps+=("desmond-results example")
     else
-        echo "  2) ${PIPELINE_ROOT}/scripts/check_env.sh"
-        echo "  3) ${PIPELINE_ROOT}/scripts/submit_smoke.sh"
-        echo "  4) ${PIPELINE_ROOT}/scripts/submit_system.sh ${SCH_WORK_ROOT}/systems/example.conf"
-        echo "  5) ${PIPELINE_ROOT}/scripts/status.sh example"
+        _steps+=("${PIPELINE_ROOT}/scripts/check_env.sh")
+        _steps+=("${PIPELINE_ROOT}/scripts/submit_smoke.sh")
+        _steps+=("${PIPELINE_ROOT}/scripts/submit_system.sh ${SCH_WORK_ROOT}/systems/example.conf")
+        _steps+=("${PIPELINE_ROOT}/scripts/status.sh example")
+        _steps+=("${PIPELINE_ROOT}/scripts/collect_results.sh example")
     fi
+    next_steps failed "${_steps[@]}"
 fi
 if [[ "$SYS_RC" != "0" ]]; then
     echo
-    echo "WARNING: system generation had failures; fix the input structures and re-run desmond-systems."
+    warn "system generation had failures; fix the input structures and re-run desmond-systems."
 fi
 exit "$SYS_RC"

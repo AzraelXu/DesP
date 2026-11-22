@@ -20,11 +20,13 @@ import json
 import sys
 from collections import defaultdict
 
+import sch_ui
+
 try:
     from schrodinger import structure
     from schrodinger.structutils import analyze
 except ImportError as exc:
-    print("FATAL: cannot import Schrodinger API: {}".format(exc), file=sys.stderr)
+    sch_ui.emit("FATAL", "FATAL: cannot import Schrodinger API: {}".format(exc))
     print("Run this script with: $SCHRODINGER/run python3 ...", file=sys.stderr)
     sys.exit(1)
 
@@ -102,8 +104,7 @@ def describe_structure(st, receptor_asl, ligand_asl, align_asl):
                     str(st.atom[i].chain).strip() or "<blank>" for i in ids
                 })
             except (IndexError, KeyError, TypeError, ValueError) as exc:
-                print("WARNING: cannot list chains for ASL {!r}: {}".format(asl, exc),
-                      file=sys.stderr)
+                sch_ui.emit("WARN", "WARNING: cannot list chains for ASL {!r}: {}".format(asl, exc))
             asl_results[label] = result
         except RuntimeError as exc:
             asl_results[label] = {"asl": asl, "atoms": None, "error": str(exc)}
@@ -112,12 +113,12 @@ def describe_structure(st, receptor_asl, ligand_asl, align_asl):
 
 
 def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_results):
-    print("Structure: {}".format(path))
-    print("Title: {}".format(st.title))
-    print("Atoms: {}".format(st.atom_total))
+    sch_ui.kv("Structure", path, 9)
+    sch_ui.kv("Title", st.title, 9)
+    sch_ui.kv("Atoms", st.atom_total, 9)
     print("")
 
-    print("Chains:")
+    sch_ui.header("Chains:")
     print("  {:<8} {:>8} {:>9} {:>10}  {}".format(
         "chain", "atoms", "residues", "polymer", "resnames"))
     for chain in sorted(chain_info):
@@ -128,7 +129,7 @@ def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_r
             len(info["polymer_residues"]), resnames))
     print("")
 
-    print("Non-polymer hetero groups:")
+    sch_ui.header("Non-polymer hetero groups:")
     if het_groups:
         for (chain, resname, resnum), natoms in sorted(het_groups.items()):
             print("  chain={:<6} resname={:<6} resnum={:<6} atoms={}".format(
@@ -137,7 +138,7 @@ def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_r
         print("  (none)")
     print("")
 
-    print("Waters:")
+    sch_ui.header("Waters:")
     if water_atoms:
         for name, natoms in sorted(water_atoms.items()):
             print("  resname={:<6} atoms={}".format(name, natoms))
@@ -145,7 +146,7 @@ def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_r
         print("  (none)")
     print("")
 
-    print("Ions:")
+    sch_ui.header("Ions:")
     if ion_atoms:
         for name, natoms in sorted(ion_atoms.items()):
             print("  resname={:<6} atoms={}".format(name, natoms))
@@ -153,7 +154,7 @@ def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_r
         print("  (none)")
     print("")
 
-    print("ASL selections:")
+    sch_ui.header("ASL selections:")
     for label in ("receptor", "ligand", "align"):
         if label not in asl_results:
             continue
@@ -190,6 +191,7 @@ def print_report(path, st, chain_info, het_groups, water_atoms, ion_atoms, asl_r
 
 
 def main():
+    argv = sch_ui.extract_color_arg(sys.argv[1:])
     parser = argparse.ArgumentParser(description="Inspect a structure and validate Desmond/ASL selections.")
     parser.add_argument("--structure", required=True, help="PDB, MAE, MAEGZ, or CMS file")
     parser.add_argument("--receptor-asl", default="", help="Receptor ASL")
@@ -198,13 +200,17 @@ def main():
     parser.add_argument("--check", action="store_true",
                         help="Exit non-zero if a provided ASL selects zero atoms or fails")
     parser.add_argument("--json-out", default="", help="Write a JSON report to this path")
-    args = parser.parse_args()
+    parser.add_argument("--color", choices=("auto", "always", "never"), default=None,
+                        help="Color output (default: auto).")
+    args = parser.parse_args(argv)
+    if args.color is not None:
+        sch_ui.set_color(args.color)
 
     reader = structure.StructureReader(args.structure)
     try:
         st = next(reader)
     except StopIteration:
-        print("FATAL: no structures found in {}".format(args.structure), file=sys.stderr)
+        sch_ui.emit("FATAL", "FATAL: no structures found in {}".format(args.structure))
         return 1
     n_cts = 1 + sum(1 for _ in reader)
 
@@ -213,7 +219,7 @@ def main():
     )
 
     if n_cts != 1:
-        print("NOTE: file contains {} CTs; details below are for the first CT only.".format(n_cts))
+        sch_ui.info("NOTE: file contains {} CTs; details below are for the first CT only.".format(n_cts))
         print("")
 
     print_report(args.structure, st, chain_info, het_groups, water_atoms, ion_atoms, asl_results)
@@ -260,7 +266,7 @@ def main():
                 failed.append("{} ASL selected 0 atoms: {!r}".format(label, asl))
         if failed:
             for msg in failed:
-                print("ERROR: {}".format(msg), file=sys.stderr)
+                sch_ui.emit("ERROR", "ERROR: {}".format(msg))
             return 1
 
     return 0

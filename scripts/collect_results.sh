@@ -8,19 +8,74 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/scripts/lib/common.sh"
 source "${PIPELINE_ROOT}/config.sh"
+source "${PIPELINE_ROOT}/scripts/lib/project_resolve.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: collect_results.sh [--color MODE] [SYSTEM_NAME | PROJECT_DIR]
+
+Collect per-project RMSD plots and MM-GBSA summaries into the top-level
+results/ directory. Without an argument, all projects are collected; with a
+system name or project directory, only that project is collected.
+
+Options:
+  --color MODE      auto (default), always, or never.
+  -h, --help        Show this help.
+EOF
+}
+
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
+TARGET=""
+while (( $# > 0 )); do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            printf 'Unknown option: %s\n' "$1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            if [[ -n "$TARGET" ]]; then
+                printf 'Only one project argument is allowed.\n' >&2
+                exit 2
+            fi
+            TARGET="$1"
+            shift
+            ;;
+    esac
+done
+
+FILTER=""
+if [[ -n "$TARGET" ]]; then
+    if ! FILTER="$(resolve_project_arg "$TARGET")"; then
+        printf 'Project not found: %s\n' "$TARGET" >&2
+        printf 'Work root: %s\n' "$SCH_WORK_ROOT" >&2
+        exit 1
+    fi
+fi
+
 setup_schrodinger_env
 
 mkdir -p "${SCH_WORK_ROOT}/results"
 
-"${SCHRODINGER}/run" python3 - "${SCH_WORK_ROOT}" <<'PY'
+"${SCHRODINGER}/run" python3 - "${SCH_WORK_ROOT}" "$FILTER" <<'PY'
 import glob
 import json
 import os
 import sys
 
 root = sys.argv[1]
+target = sys.argv[2] if len(sys.argv) > 2 else ""
 results_dir = os.path.join(root, "results")
-projects = sorted(glob.glob(os.path.join(root, "projects", "*")))
+if target:
+    projects = [target]
+else:
+    projects = sorted(glob.glob(os.path.join(root, "projects", "*")))
 
 rows = []
 ligand_plots = []
@@ -97,6 +152,6 @@ print("MM-GBSA systems: {}  ligand plots: {}".format(len(rows), len(ligand_plots
 PY
 
 echo
-echo "Indexes:"
-echo "  ${SCH_WORK_ROOT}/results/mmgbsa_summary.md"
-echo "  ${SCH_WORK_ROOT}/results/ligand_rmsd_index.md"
+next_steps ok \
+    "Review ${SCH_WORK_ROOT}/results/mmgbsa_summary.md" \
+    "Review ${SCH_WORK_ROOT}/results/ligand_rmsd_index.md"

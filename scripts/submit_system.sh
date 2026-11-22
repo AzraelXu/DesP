@@ -16,6 +16,9 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/scripts/lib/common.sh"
 
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
 usage() {
     cat <<'EOF'
 Usage: submit_system.sh <system.conf> [options]
@@ -36,6 +39,7 @@ Options:
                          PBS_WALLTIME_MD or split the MD. See README.md (known limitations).
   --no-analysis          Do not submit the RMSD analysis job
   --no-mmgbsa            Do not submit the MM-GBSA job
+  --color MODE           auto (default), always, or never
   -h, --help             Show this help
 EOF
 }
@@ -264,7 +268,7 @@ STRUCT="${PREPARED_STRUCTURE:-$INPUT_STRUCTURE}"
 require_file "$STRUCT" "input structure"
 struct_report="${PROJECT_DIR}/state/structure_report_input.json"
 inspect_out=""
-if ! inspect_out="$("$SCHRODINGER/run" python3 "${PIPELINE_ROOT}/scripts/inspect_structure.py" \
+if ! inspect_out="$(SCH_COLOR=never "$SCHRODINGER/run" python3 "${PIPELINE_ROOT}/scripts/inspect_structure.py" \
         --structure "$STRUCT" \
         --receptor-asl "$RECEPTOR_ASL" \
         --ligand-asl "$LIGAND_ASL" \
@@ -415,11 +419,11 @@ done
 # ---------------------------------------------------------------------------
 if [[ "$DRY_RUN" == "yes" ]]; then
     echo
-    echo "================ submission plan: ${SYSTEM_NAME} ================"
-    echo "project      : ${PROJECT_DIR}"
-    echo "run id       : ${RUN_ID}"
-    echo "stages       : ${selected[*]}"
-    echo "frozen config: ${PROJECT_DIR}/project.resolved.conf"
+    header "================ submission plan: ${SYSTEM_NAME} ================"
+    ui_kv "project" "$PROJECT_DIR" 13
+    ui_kv "run id" "$RUN_ID" 13
+    ui_kv "stages" "${selected[*]}" 13
+    ui_kv "frozen config" "${PROJECT_DIR}/project.resolved.conf" 13
     echo
     for s in "${selected[@]}"; do
         case "$s" in
@@ -429,11 +433,11 @@ if [[ "$DRY_RUN" == "yes" ]]; then
             analysis) script="$analysis_pbs" ;;
             mmgbsa) script="$mmgbsa_pbs" ;;
         esac
-        echo "--- ${s}: ${script}"
+        header "--- ${s}: ${script}"
         grep '^#PBS' "$script" | sed 's/^/    /'
         echo
     done
-    echo "qsub chain (job IDs are filled in at real submission time):"
+    header "qsub chain (job IDs are filled in at real submission time):"
     prep_label=""
     min_label=""
     md_label=""
@@ -476,7 +480,7 @@ if [[ "$DRY_RUN" == "yes" ]]; then
         esac
     done
     echo
-    echo "Dry run only; no jobs submitted."
+    info "Dry run only; no jobs submitted."
     exit 0
 fi
 
@@ -500,7 +504,7 @@ submit_one() {
 
     log INFO "submitting ${stage}: ${cmd[*]}"
     local out rc=0
-    out="$("${cmd[@]}" 2>&1)" || rc=$?
+    out="$(SCH_COLOR=never "${cmd[@]}" 2>&1)" || rc=$?
     if (( rc != 0 )); then
         log FATAL "qsub failed for ${stage} (rc=${rc}): ${out}"
         return 1
@@ -578,7 +582,7 @@ fi
 
 log OK "submitted ${SYSTEM_NAME} run ${RUN_ID}"
 echo
-echo "================ submitted: ${SYSTEM_NAME} ================"
+header "================ submitted: ${SYSTEM_NAME} ================"
 printf '  %-10s %-14s %s\n' "stage" "PBS job id" "PBS stdout"
 if [[ -n "$prep_job" ]]; then printf '  %-10s %-14s %s\n' "prep" "$prep_job" "${PROJECT_DIR}/logs/pbs/prep.${RUN_ID}.out"; fi
 if [[ -n "$min_job" ]]; then printf '  %-10s %-14s %s\n' "min" "$min_job" "${PROJECT_DIR}/logs/pbs/min.${RUN_ID}.out"; fi
@@ -586,6 +590,8 @@ if [[ -n "$md_job" ]]; then printf '  %-10s %-14s %s\n' "md" "$md_job" "${PROJEC
 if [[ -n "$analysis_job" ]]; then printf '  %-10s %-14s %s\n' "analysis" "$analysis_job" "${PROJECT_DIR}/logs/pbs/analysis.${RUN_ID}.out"; fi
 if [[ -n "$mmgbsa_job" ]]; then printf '  %-10s %-14s %s\n' "mmgbsa" "$mmgbsa_job" "${PROJECT_DIR}/logs/pbs/mmgbsa.${RUN_ID}.out"; fi
 echo
-echo "Monitor: ${PIPELINE_ROOT}/scripts/status.sh ${SYSTEM_NAME}"
-echo "Logs   : ${PROJECT_DIR}/logs/"
-echo "==========================================================="
+next_steps ok \
+    "${PIPELINE_ROOT}/scripts/status.sh ${SYSTEM_NAME}" \
+    "${PIPELINE_ROOT}/scripts/collect_results.sh ${SYSTEM_NAME}"
+debug "Logs   : ${PROJECT_DIR}/logs/"
+rule "==========================================================="

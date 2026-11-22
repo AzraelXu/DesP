@@ -136,13 +136,15 @@ assert_eq 0 "$?" "unbalanced bashrc unchanged"
 # Safety guards: /tmp and the pipeline source tree require --force.
 # ---------------------------------------------------------------------------
 h7="$(fresh_home h7)"
-w8="$SANDBOX/w8"
-mkdir -p "$w8"
+# The /tmp guard must be tested under the real /tmp even when the test
+# sandbox is moved elsewhere via TMPDIR.
+w8="$(mktemp -d /tmp/desmond_tmp_guard.XXXXXX)"
 out="$(INIT_HOME="$h7" run_init "$w8")"
 rc=$?
 if (( rc != 0 )); then pass; else fail "/tmp init without --force should fail"; fi
 assert_contains "$out" "refusing to use /tmp" "/tmp guard message"
 assert_not_exists "$w8/.desmond_work_root"
+rm -rf "$w8"
 
 h8="$(fresh_home h8)"
 out="$(INIT_HOME="$h8" run_init "$REPO_ROOT")"

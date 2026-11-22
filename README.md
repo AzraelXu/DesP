@@ -714,8 +714,9 @@ MD 时长/温度/轨迹间隔/cutoff、ASL、MM-GBSA 窗口等）。升级后若
 
 ### 11.1 walltime、checkpoint 与重启
 
-MD scratch 位置由 `SCHRODINGER_TMPDIR`/站点配置决定（本集群为 `$HOME/tmp`，
-部分集群为 `/var/tmp/$USER`）；目录名包含 jobname，按作业隔离。如果 scratch
+MD scratch 位置由 `SCHRODINGER_TMPDIR`/站点配置决定（本集群为
+`/home/sch/tmp/$USER`，可用 `SCH_SCRATCH_DIR` 覆盖；旧的 `$HOME/tmp` 布局仍会被
+`desmond-status` 搜索）；目录名包含 jobname，按作业隔离。如果 scratch
 在计算节点本地而不是共享文件系统：
 
 - 正常完成：`-out.cms`、`_trj/`、`.cpt`、`*-out.tgz` 回传到项目目录；

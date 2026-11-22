@@ -177,7 +177,7 @@ Project : my_sys
 Run     : 20261116_152012_46171 (submitted 2026-11-16 15:20)
 Step    : md (4/6) -- running (PBS 995), elapsed 2h 14m
 Progress: 432.0 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)
-Log     : /home/user1/tmp/user1/desmond_md_job_my_sys/desmond_md_job_my_sys.log
+Log     : /home/sch/tmp/user1/desmond_md_job_my_sys/desmond_md_job_my_sys.log
 ETA     : ~1d 04h; PBS walltime left 3d 21h
 Warnings: 1 in this run
   [WARN] ...
@@ -187,7 +187,8 @@ Errors  : none
 - `Warnings`/`Errors` 只统计本次提交（`SUBMITTED_AT`）之后的记录；旧运行的
   警告需要手动 `grep '^\[WARN\]' logs/pipeline.log`。
 - MD 运行中会先查项目目录，再查共享 scratch
-  （`$HOME/tmp/$USER/desmond_md_job_<P>*/`）里的引擎日志；找到后显示 `Log`
+  （`SCH_SCRATCH_DIR`，默认 `/home/sch/tmp/$USER`，以及旧的 `$HOME/tmp/$USER`）
+  里的引擎日志；找到后显示 `Log`
   路径和 ETA。日志尚未出现时显示 `unknown (engine log not found yet)`，
   只给 PBS walltime 余量。
 - 失败阶段会显示 `FAILED`、`Blocked : ...` 以及 PBS/阶段日志尾部。
@@ -251,7 +252,8 @@ Errors  : none
 **Q：`status.sh` 为什么没有 ETA？**
 queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS walltime
 余量。MD 会先查项目目录，再查共享 scratch
-（`$HOME/tmp/$USER/desmond_md_job_<P>*/`）里的引擎日志，通常 MD 开始后
+（`SCH_SCRATCH_DIR`，默认 `/home/sch/tmp/$USER`，以及旧的 `$HOME/tmp/$USER`）；
+目录名形如 `desmond_md_job_<P>*/`，通常 MD 开始后
 几分钟内即可显示 ETA；如果日志还没出现，会显示 `engine log not found yet`，
 稍后重试即可。
 

@@ -8,6 +8,9 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/scripts/lib/common.sh"
 
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
 usage() {
     cat <<'EOF'
 Usage: submit_batch.sh [options] <systems/dir-or-conf> [<conf> ...]
@@ -19,6 +22,7 @@ Options are passed to submit_system.sh for every system:
   --restart-md
   --no-analysis
   --no-mmgbsa
+  --color MODE             auto (default), always, or never
 
 When a directory is given, example.conf and gda10_pilot.conf are skipped
 as placeholder templates; pass a template file explicitly to submit it.
@@ -82,9 +86,9 @@ for f in "${FILES[@]}"; do
     seen[$name]="$f"
 done
 
-echo "Batch: ${#FILES[@]} system(s)"
+header "Batch: ${#FILES[@]} system(s)"
 for f in "${FILES[@]}"; do
-    echo "  $f"
+    info "  $f"
 done
 echo
 
@@ -94,14 +98,14 @@ failed_names=()
 
 for f in "${FILES[@]}"; do
     name="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${SYSTEM_NAME:-}"' _ "$f" || true)"
-    echo "=================================================================="
+    rule "=================================================================="
     if [[ "$DRY_RUN" == "yes" ]]; then
-        echo "Processing system (dry run): ${name}"
+        header "Processing system (dry run): ${name}"
     else
-        echo "Submitting system: ${name}"
+        header "Submitting system: ${name}"
     fi
-    echo "Config: ${f}"
-    echo "=================================================================="
+    ui_kv "Config" "$f" 6
+    rule "=================================================================="
 
     cmd=(bash "${SCRIPT_DIR}/submit_system.sh" "$f")
     if (( ${#PASS[@]} > 0 )); then
@@ -118,16 +122,17 @@ for f in "${FILES[@]}"; do
     echo
 done
 
-echo "=================================================================="
+rule "=================================================================="
 if [[ "$DRY_RUN" == "yes" ]]; then
-    echo "Batch summary (dry run): ${ok} processed, ${failed} failed"
+    header "Batch summary (dry run): ${ok} processed, ${failed} failed"
 else
-    echo "Batch summary: ${ok} submitted, ${failed} failed"
+    header "Batch summary: ${ok} submitted, ${failed} failed"
 fi
 if (( failed > 0 )); then
-    echo "Failed systems: ${failed_names[*]}"
+    ui_emit_out ERROR "Failed systems: ${failed_names[*]}"
+    next_steps failed "desmond-check" "desmond-smoke" "desmond-status" "desmond-results"
     exit 1
 fi
 if [[ "$DRY_RUN" != "yes" ]]; then
-    echo "Use scripts/status.sh to monitor all projects."
+    next_steps ok "desmond-status" "desmond-results"
 fi

@@ -8,6 +8,8 @@ if [[ -z "${PIPELINE_ROOT:-}" ]]; then
     export PIPELINE_ROOT
 fi
 
+source "${PIPELINE_ROOT}/scripts/lib/ui.sh"
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -18,7 +20,8 @@ log() {
     shift
     local line
     line="[${level}] $(_timestamp) $*"
-    printf '%s\n' "$line"
+    # The terminal copy may be colored; pipeline.log always gets plain text.
+    ui_emit "$level" "$line"
     if [[ -n "${PROJECT_DIR:-}" && -d "${PROJECT_DIR}/logs" ]]; then
         printf '%s\n' "$line" >> "${PROJECT_DIR}/logs/pipeline.log" 2>/dev/null || true
     fi
@@ -225,6 +228,15 @@ setup_schrodinger_env() {
     export LC_ALL=C
     export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 
+    # Site scratch root (default: /home/sch/tmp/$USER). An explicit
+    # SCHRODINGER_TMPDIR always wins; an empty one is treated as unset.
+    if [[ -z "${SCHRODINGER_TMPDIR:-}" && -n "${SCH_SCRATCH_DIR:-}" \
+          && -d "$SCH_SCRATCH_DIR" && -w "$SCH_SCRATCH_DIR" ]]; then
+        export SCHRODINGER_TMPDIR="$SCH_SCRATCH_DIR"
+    elif [[ -n "${SCHRODINGER_TMPDIR:-}" ]]; then
+        export SCHRODINGER_TMPDIR
+    fi
+
     # Empty values for these variables are harmful: an empty
     # SCHRODINGER_HOSTS makes jobcontrol fail with MMJOB_HOSTS_MISSING.
     if [[ -n "${SCHRODINGER_LICENSE_FILE:-}" ]]; then
@@ -249,7 +261,7 @@ setup_schrodinger_env() {
 # ---------------------------------------------------------------------------
 FREEZE_VARS=(
     PIPELINE_ROOT SCH_WORK_ROOT GPU_LOCK_DIR PROJECT_DIR SYSTEM_NAME SYSTEM_CONF SYSTEM_CONF_DIR
-    SCHRODINGER SCHRODINGER_LICENSE_FILE LM_LICENSE_FILE SCHRODINGER_HOSTS
+    SCHRODINGER SCHRODINGER_TMPDIR SCHRODINGER_LICENSE_FILE LM_LICENSE_FILE SCHRODINGER_HOSTS
     QSUB QSTAT QDEL PBSNODES PBS_QUEUE
     PBS_PPN_PREP PBS_PPN_ANALYSIS PBS_PPN_MMGBSA
     PBS_WALLTIME_PREP PBS_WALLTIME_MIN PBS_WALLTIME_MD
@@ -353,6 +365,9 @@ stage_log_start() {
     LOG="${logdir}/${stage}_${job}_$(_timestamp | tr -d ' :-').log"
     echo "Detailed log: ${LOG}"
     exec >> "${LOG}" 2>&1
+    # The stage log is a file and is parsed by status.sh; never color it, even
+    # if the submitter exported SCH_COLOR=always.
+    ui_set_color never
     STAGE_START="$(_timestamp)"
     log INFO "===== stage ${stage} start ====="
     log INFO "host=$(hostname) job=${PBS_JOBID:-manual} project=${PROJECT_DIR}"
@@ -414,7 +429,7 @@ validate_cms() {
         args+=(--reference "$ref")
     fi
     local out rc=0
-    out="$("${SCHRODINGER}/run" python3 "${PIPELINE_ROOT}/tools/validate_cms.py" "${args[@]}" 2>&1)" || rc=$?
+    out="$(SCH_COLOR=never "${SCHRODINGER}/run" python3 "${PIPELINE_ROOT}/tools/validate_cms.py" "${args[@]}" 2>&1)" || rc=$?
     printf '%s\n' "$out"
     (( rc == 0 )) || die "CMS validation failed: ${cms}"
 }
@@ -422,7 +437,7 @@ validate_cms() {
 check_asls() {
     local struct="$1"
     local out rc=0
-    out="$("${SCHRODINGER}/run" python3 "${PIPELINE_ROOT}/scripts/inspect_structure.py" \
+    out="$(SCH_COLOR=never "${SCHRODINGER}/run" python3 "${PIPELINE_ROOT}/scripts/inspect_structure.py" \
         --structure "$struct" \
         --receptor-asl "$RECEPTOR_ASL" \
         --ligand-asl "$LIGAND_ASL" \

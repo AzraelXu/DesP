@@ -473,7 +473,7 @@ Project : my_sys
 Run     : 20261116_152012_46171 (submitted 2026-11-16 15:20)
 Step    : md (4/6) -- running (PBS 995), elapsed 2h 14m
 Progress: 432.0 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)
-Log     : /home/user1/tmp/user1/desmond_md_job_my_sys/desmond_md_job_my_sys.log
+Log     : /home/sch/tmp/user1/desmond_md_job_my_sys/desmond_md_job_my_sys.log
 ETA     : ~1d 04h; PBS walltime left 3d 21h
 Warnings: 1 in this run
   [WARN] ...
@@ -527,7 +527,8 @@ Errors  : none
 ### 6.3 实时看 MD
 
 Desmond 在 scratch 目录写引擎日志。scratch 位置由 `SCHRODINGER_TMPDIR` 和
-站点配置决定（常见为 `/var/tmp/$USER/` 或 `$HOME/tmp`），目录名包含 jobname，
+站点配置决定（本集群为 `/home/sch/tmp/$USER`，可用 `SCH_SCRATCH_DIR` 覆盖；
+旧的 `$HOME/tmp` 布局仍兼容），目录名包含 jobname，
 按作业隔离；作业结束后日志才回传到项目目录。需要实时查看时：
 
 ```bash
@@ -535,7 +536,7 @@ qstat -n <md_jobid>          # 找节点
 ssh <node> tail -f <scratch>/<jobname>.*/<jobname>.log
 ```
 
-`<scratch>` 以 `SCHRODINGER_TMPDIR`/作业日志为准。不想 ssh 就等作业结束后看
+`<scratch>` 以 `SCHRODINGER_TMPDIR`/`SCH_SCRATCH_DIR`/作业日志为准。不想 ssh 就等作业结束后看
 项目日志。
 
 ---
@@ -859,7 +860,8 @@ Desmond 在 scratch 目录写日志，完成才回传。需要实时看就
 **Q17：`status.sh` 为什么没有 ETA / 只显示 unknown？**
 queued/running 的非 MD 阶段没有可靠进度源，只显示 elapsed 和 PBS walltime
 余量。MD 会先查项目目录，再查共享 scratch
-（`$HOME/tmp/$USER/desmond_md_job_<P>*/`）里的引擎日志，通常 MD 开始后
+（`SCH_SCRATCH_DIR`，默认 `/home/sch/tmp/$USER`，以及旧的 `$HOME/tmp/$USER`）；
+目录名形如 `desmond_md_job_<P>*/`，通常 MD 开始后
 几分钟内即可显示 ETA；如果日志还没出现，会显示 `engine log not found yet`，
 稍后重试即可。
 

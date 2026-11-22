@@ -2,9 +2,7 @@
 # Status state helpers: project discovery, frozen/jobs parsing, qstat, stage state.
 # Sourced by scripts/status.sh; expects the globals declared there.
 
-canon_project_dir() {
-    readlink -f "$1" 2>/dev/null || printf '%s' "$1"
-}
+source "${PIPELINE_ROOT}/scripts/lib/project_resolve.sh"
 
 add_project() {
     local d="$1"
@@ -16,33 +14,14 @@ add_project() {
     PROJECTS+=("$d")
 }
 
-frozen_system_name() {
-    bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${SYSTEM_NAME:-}"' _ "$1" 2>/dev/null || true
-}
-
 collect_projects() {
     local arg="${1:-}"
     PROJECTS=()
     PROJECT_SEEN=()
     if [[ -n "$arg" ]]; then
-        if [[ -d "$arg" ]]; then
-            add_project "$arg"
-        elif [[ -f "$arg" && "$(basename "$arg")" == "project.resolved.conf" ]]; then
-            add_project "$(dirname "$arg")"
-        else
-            local p="${SCH_WORK_ROOT}/projects/${arg}"
-            if [[ -d "$p" ]]; then
-                add_project "$p"
-            else
-                local d name
-                shopt -s nullglob
-                for d in "${SCH_WORK_ROOT}/projects"/*; do
-                    [[ -d "$d" && -f "$d/project.resolved.conf" ]] || continue
-                    name="$(frozen_system_name "$d/project.resolved.conf")"
-                    [[ "$name" == "$arg" ]] && add_project "$d"
-                done
-                shopt -u nullglob
-            fi
+        local p
+        if p="$(resolve_project_arg "$arg")"; then
+            add_project "$p"
         fi
     else
         local d
@@ -393,8 +372,9 @@ project_total_duration() {
 }
 
 # Find the newest Desmond engine log for a running MD job. multisim runs the
-# engine in a scratch directory (usually $HOME/tmp/$USER) and copies the log
-# into the project only when the stage finishes; check both places.
+# engine in a scratch directory (SCHRODINGER_TMPDIR, SCH_SCRATCH_DIR, or
+# $HOME/tmp/$USER) and copies the log into the project only when the stage
+# finishes; check both places.
 find_md_engine_log() {
     local pdir="$1"
     local name="$2"
@@ -404,7 +384,7 @@ find_md_engine_log() {
     [[ -f "$base" ]] && candidates+=("$base")
     local user="${USER:-}"
     local root
-    for root in "${SCHRODINGER_TMPDIR:-}" "${TMPDIR:-}" \
+    for root in "${SCHRODINGER_TMPDIR:-}" "${SCH_SCRATCH_DIR:-}" "${TMPDIR:-}" \
                 "${HOME:-}/tmp/${user}" "${HOME:-}/tmp"; do
         [[ -n "$root" && -d "$root" ]] || continue
         local d=""

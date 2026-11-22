@@ -23,6 +23,7 @@ import re
 import sys
 import tempfile
 
+import sch_ui
 from system_generation import (
     CHAIN_RE,
     GENERATED_MARKER,
@@ -89,8 +90,12 @@ def parse_args(argv=None):
                           help="Shortcut for --on-existing skip (default).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the plan without writing any config files.")
+    parser.add_argument("--color", choices=("auto", "always", "never"), default=None,
+                        help="Color output (default: auto).")
     parser.add_argument("--check-args", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.color is not None:
+        sch_ui.set_color(args.color)
 
     if args.manifest and args.input_dir:
         parser.error("--manifest and --input-dir are mutually exclusive")
@@ -164,39 +169,39 @@ def parse_args(argv=None):
 
 
 def print_summary(input_label, systems_dir, discovered, counts, failures, dry_run=False):
-    print("=" * SUMMARY_WIDTH)
-    print("Batch system generation summary{}".format(" (dry run)" if dry_run else ""))
-    print("  input      : {}".format(input_label))
-    print("  systems    : {}".format(systems_dir))
-    print("  discovered : {}".format(discovered))
-    print("  created    : {}".format(counts["created"]))
-    print("  overwritten: {}".format(counts["overwritten"]))
-    print("  skipped    : {}".format(counts["skipped"]))
-    print("  failed     : {}".format(len(failures)))
+    sch_ui.rule("=" * SUMMARY_WIDTH)
+    sch_ui.header("Batch system generation summary{}".format(" (dry run)" if dry_run else ""))
+    sch_ui.kv("input", input_label, 11, indent=2)
+    sch_ui.kv("systems", systems_dir, 11, indent=2)
+    sch_ui.kv("discovered", discovered, 11, indent=2)
+    sch_ui.kv("created", counts["created"], 11, indent=2)
+    sch_ui.kv("overwritten", counts["overwritten"], 11, indent=2)
+    sch_ui.kv("skipped", counts["skipped"], 11, indent=2)
+    sch_ui.kv("failed", len(failures), 11, indent=2)
     if failures:
-        print("Failed systems:")
+        sch_ui.header("Failed systems:")
         for entry, reason in failures:
             print("  {}: {}".format(entry["display"], reason))
-    print("=" * SUMMARY_WIDTH)
+    sch_ui.rule("=" * SUMMARY_WIDTH)
 
 
 def print_plan_line(item, path, action, reason, args):
     entry = item["entry"]
     system_name = item["system_name"]
     if action == "create":
-        print("[DRY-RUN] {} -> {} (would create {})".format(
+        sch_ui.emit("DRY-RUN", "[DRY-RUN] {} -> {} (would create {})".format(
             entry["display"], system_name, path))
     elif action == "skip_unchanged":
-        print("[DRY-RUN] {} -> {} (would skip, unchanged: {})".format(
+        sch_ui.emit("DRY-RUN", "[DRY-RUN] {} -> {} (would skip, unchanged: {})".format(
             entry["display"], system_name, path))
     elif action == "skip_differs":
-        print("[DRY-RUN] {} -> {} (would keep, exists and differs: {})".format(
+        sch_ui.emit("DRY-RUN", "[DRY-RUN] {} -> {} (would keep, exists and differs: {})".format(
             entry["display"], system_name, path))
     elif action == "overwrite":
-        print("[DRY-RUN] {} -> {} (would overwrite {})".format(
+        sch_ui.emit("DRY-RUN", "[DRY-RUN] {} -> {} (would overwrite {})".format(
             entry["display"], system_name, path))
     else:
-        print("[ERROR]   {} -> {} (would fail: {})".format(
+        sch_ui.emit_out("ERROR", "[ERROR]   {} -> {} (would fail: {})".format(
             entry["display"], system_name, reason))
     if action != "fail":
         print("          {}={}  RECEPTOR_ASL={}  LIGAND_ASL={}".format(
@@ -208,6 +213,11 @@ def print_plan_line(item, path, action, reason, args):
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    else:
+        argv = list(argv)
+    argv = sch_ui.extract_color_arg(argv)
     args = parse_args(argv)
     if args.check_args:
         return 0
@@ -273,8 +283,8 @@ def main(argv=None):
             signature = frozenset(item["ligand"]["chains"])
             signatures.setdefault(signature, []).append(item)
         if len(signatures) > 1:
-            print("FATAL: ligand chain is not consistent across input structures:",
-                  file=sys.stderr)
+            sch_ui.emit("FATAL",
+                        "FATAL: ligand chain is not consistent across input structures:")
             for item in detected:
                 print("  {}: {}".format(
                     item["entry"]["display"],
@@ -283,7 +293,7 @@ def main(argv=None):
             print("Unify the ligand chain IDs in the input structures, or pass "
                   "--ligand-chain to select a common chain.", file=sys.stderr)
             for entry, reason in failures:
-                print("[ERROR] {}: {}".format(entry["display"], reason))
+                sch_ui.emit_out("ERROR", "[ERROR] {}: {}".format(entry["display"], reason))
             return 1
 
         receptor_signatures = set()
@@ -319,7 +329,7 @@ def main(argv=None):
             resolve_names(successes, args)
         except GenerationError as exc:
             for entry, reason in failures:
-                print("[ERROR] {}: {}".format(entry["display"], reason))
+                sch_ui.emit_out("ERROR", "[ERROR] {}: {}".format(entry["display"], reason))
             fatal(str(exc))
             return 1
 
@@ -354,8 +364,8 @@ def main(argv=None):
                 if action == "create":
                     write_config(path, item["content"])
                     counts["created"] += 1
-                    print("[OK]      {} -> {}".format(entry["display"], system_name))
-                    print("          config: {}".format(path))
+                    sch_ui.emit("OK", "[OK]      {} -> {}".format(entry["display"], system_name))
+                    sch_ui.kv("config", path, 6, indent=10)
                     print("          {}={}  RECEPTOR_ASL={}  LIGAND_ASL={}".format(
                         "PREPARED_STRUCTURE" if args.structure_field == "prepared"
                         else "INPUT_STRUCTURE",
@@ -372,26 +382,28 @@ def main(argv=None):
                         warn("overwriting {} (manual edits will be lost)".format(path))
                     write_config(path, item["content"])
                     counts["overwritten"] += 1
-                    print("[OK]      {} -> {} (overwritten)".format(entry["display"], system_name))
-                    print("          config: {}".format(path))
+                    sch_ui.emit("OK", "[OK]      {} -> {} (overwritten)".format(
+                        entry["display"], system_name))
+                    sch_ui.kv("config", path, 6, indent=10)
                 elif action == "skip_unchanged":
                     counts["skipped"] += 1
-                    print("[SKIP]    {} -> {} (config exists, unchanged)".format(
+                    sch_ui.emit("SKIP", "[SKIP]    {} -> {} (config exists, unchanged)".format(
                         entry["display"], system_name))
-                    print("          config: {}".format(path))
+                    sch_ui.kv("config", path, 6, indent=10)
                 elif action == "skip_differs":
                     counts["skipped"] += 1
-                    print("[WARN]    {} -> {} (config exists and differs; kept, "
-                          "use --overwrite)".format(entry["display"], system_name))
-                    print("          config: {}".format(path))
+                    sch_ui.emit("WARN", "[WARN]    {} -> {} (config exists and differs; kept, "
+                                "use --overwrite)".format(entry["display"], system_name))
+                    sch_ui.kv("config", path, 6, indent=10)
                 else:
                     failures.append((entry, reason))
-                    print("[ERROR]   {}: {}".format(entry["display"], reason))
-                    print("          config: {}".format(path))
+                    sch_ui.emit("ERROR", "[ERROR]   {}: {}".format(entry["display"], reason))
+                    sch_ui.kv("config", path, 6, indent=10)
             except OSError as exc:
                 failures.append((entry, "write failed: {}".format(exc)))
-                print("[ERROR]   {}: write failed: {}".format(entry["display"], exc))
-                print("          config: {}".format(path))
+                sch_ui.emit("ERROR", "[ERROR]   {}: write failed: {}".format(
+                    entry["display"], exc))
+                sch_ui.kv("config", path, 6, indent=10)
 
     print_summary(input_label, systems_dir, len(entries), counts, failures, args.dry_run)
     return 1 if failures else 0

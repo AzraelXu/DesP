@@ -11,6 +11,8 @@
 set -euo pipefail
 # Some Torque setups do not deliver #PBS -o output; capture it ourselves.
 exec >> "@PBS_OUT@" 2>&1
+# PBS stdout is a file parsed by status.sh; never emit ANSI into it.
+export SCH_COLOR=never
 
 PIPELINE_ROOT="@PIPELINE_ROOT@"
 SCH_WORK_ROOT="@SCH_WORK_ROOT@"

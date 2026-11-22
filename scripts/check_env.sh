@@ -7,23 +7,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/config.sh"
+source "${PIPELINE_ROOT}/scripts/lib/ui.sh"
+
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
 
 PASS=0
 WARN=0
 FAIL=0
 
-ok()   { printf '[PASS] %s\n' "$*"; PASS=$((PASS + 1)); }
-warn() { printf '[WARN] %s\n' "$*"; WARN=$((WARN + 1)); }
-bad()  { printf '[FAIL] %s\n' "$*"; FAIL=$((FAIL + 1)); }
+ok()   { ui_emit OK "[PASS] $*"; PASS=$((PASS + 1)); }
+warn() { ui_emit WARN "[WARN] $*"; WARN=$((WARN + 1)); }
+bad()  { ui_emit FAIL "[FAIL] $*"; FAIL=$((FAIL + 1)); }
 
-echo "============================================================"
-echo "Desmond pipeline environment check"
-echo "host      : $(hostname)"
-echo "user      : ${USER:-unknown}"
-echo "pipeline  : ${PIPELINE_ROOT}"
-echo "work root : ${SCH_WORK_ROOT}"
-echo "SCHRODINGER: ${SCHRODINGER}"
-echo "============================================================"
+rule "============================================================"
+header "Desmond pipeline environment check"
+ui_kv "host" "$(hostname)"
+ui_kv "user" "${USER:-unknown}"
+ui_kv "pipeline" "${PIPELINE_ROOT}"
+ui_kv "work root" "${SCH_WORK_ROOT}"
+ui_kv "SCHRODINGER" "${SCHRODINGER}"
+rule "============================================================"
 echo
 
 # ---------------------------------------------------------------------------
@@ -41,7 +45,8 @@ fi
 if [[ -d "$SCHRODINGER" ]]; then
     ok "Schrodinger directory exists: ${SCHRODINGER}"
     if [[ -f "${SCHRODINGER}/version.txt" ]]; then
-        printf '       %s\n' "$(head -1 "${SCHRODINGER}/version.txt")"
+        printf '       '
+        debug "$(head -1 "${SCHRODINGER}/version.txt")"
     else
         warn "version.txt not found in ${SCHRODINGER}"
     fi
@@ -96,13 +101,13 @@ done
 
 if command -v "$QSTAT" >/dev/null 2>&1; then
     echo
-    echo "--- queue summary (${QSTAT} -q) ---"
+    header "--- queue summary (${QSTAT} -q) ---"
     "$QSTAT" -q 2>&1 | sed 's/^/    /'
     echo
 fi
 
 if command -v "$PBSNODES" >/dev/null 2>&1; then
-    echo "--- nodes and GPUs (${PBSNODES} -a) ---"
+    header "--- nodes and GPUs (${PBSNODES} -a) ---"
     printf '    %-10s %-10s %-6s %-6s\n' "node" "state" "np" "gpus"
     node_report="$("$PBSNODES" -a 2>/dev/null | awk '
         /^[A-Za-z]/ {
@@ -118,7 +123,7 @@ if command -v "$PBSNODES" >/dev/null 2>&1; then
     total_gpus="$(printf '%s\n' "$node_report" | awk '$4 ~ /^[0-9]+$/ {s += $4} END {print s + 0}')"
     if (( total_gpus > 0 )); then
         ok "total GPU slots visible to the scheduler: ${total_gpus}"
-        echo "       Each min/MD job requests 1 GPU; at most ${total_gpus} of them can run at once."
+        debug "       Each min/MD job requests 1 GPU; at most ${total_gpus} of them can run at once."
     else
         warn "no 'gpus' resources found in pbsnodes output; check Torque GPU configuration"
     fi
@@ -195,7 +200,7 @@ done
 
 if command -v df >/dev/null 2>&1; then
     echo
-    echo "--- disk space ---"
+    header "--- disk space ---"
     df -h "${SCH_WORK_ROOT}" 2>/dev/null | sed 's/^/    /'
     echo
 fi
@@ -203,8 +208,8 @@ fi
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
-echo "============================================================"
-echo "PASS=${PASS}  WARN=${WARN}  FAIL=${FAIL}"
+rule "============================================================"
+info "PASS=${PASS}  WARN=${WARN}  FAIL=${FAIL}"
 if (( FAIL > 0 )); then
     echo "Result: FAIL - fix the items above before submitting production jobs."
     exit 1

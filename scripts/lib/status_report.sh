@@ -131,7 +131,8 @@ print_last_lines() {
     local -a arr=("$@")
     local i
     for ((i = start; i < n; i++)); do
-        printf '  %s\n' "${arr[$i]}"
+        printf '  '
+        ui_emit_out "$pattern" "${arr[$i]}"
     done
     return 0
 }
@@ -142,10 +143,10 @@ print_messages() {
     shift 2
     local n=$#
     if (( n == 0 )); then
-        printf '%-8s: none\n' "$label"
+        ui_kv "$label" "none" 8
         return 0
     fi
-    printf '%-8s: %d in this run\n' "$label" "$n"
+    ui_kv "$label" "${n} in this run" 8
     print_last_lines "$pattern" "$@"
     if (( n > 3 )); then
         printf "  ... and %d more (grep '^\\[%s\\]' logs/pipeline.log)\n" "$((n - 3))" "$pattern"
@@ -156,8 +157,8 @@ print_diagnostics() {
     local pdir="$1"
     local log="$pdir/logs/pipeline.log"
     if [[ ! -f "$log" ]]; then
-        echo "Warnings: none (no log yet)"
-        echo "Errors  : none (no log yet)"
+        ui_kv "Warnings" "none (no log yet)" 8
+        ui_kv "Errors" "none (no log yet)" 8
         return 0
     fi
     local cutoff=""
@@ -169,14 +170,14 @@ print_diagnostics() {
     mapfile -t fatals < <(collect_level "$log" FATAL "$cutoff")
     mapfile -t errors < <(collect_level "$log" ERROR "$cutoff")
     if [[ -z "$cutoff" ]]; then
-        echo "Warnings: showing latest messages (no run timestamp)"
+        ui_kv "Warnings" "showing latest messages (no run timestamp)" 8
     fi
     print_messages "Warnings" "WARN" "${warns[@]}"
     local nerr=$(( ${#fatals[@]} + ${#errors[@]} ))
     if (( nerr == 0 )); then
-        echo "Errors  : none"
+        ui_kv "Errors" "none" 8
     else
-        echo "Errors  : ${nerr} in this run"
+        ui_kv "Errors" "${nerr} in this run" 8
         print_last_lines "FATAL" "${fatals[@]}"
         print_last_lines "ERROR" "${errors[@]}"
         local shown=0
@@ -195,22 +196,22 @@ print_failure_context() {
     local pbsout=""
     local slog=""
     echo
-    echo "Last output for ${stage}:"
+    header "Last output for ${stage}:"
     if [[ -n "$J_RUN_ID" ]]; then
         pbsout="$pdir/logs/pbs/${STAGE_PBS[$stage]}.${J_RUN_ID}.out"
         if [[ -f "$pbsout" ]]; then
-            echo "  ${pbsout#$pdir/}:"
+            info "  ${pbsout#$pdir/}:"
             tail -n 15 "$pbsout" | sed 's/^/    /'
         else
-            echo "  (PBS stdout not found: ${pbsout#$pdir/})"
+            debug "  (PBS stdout not found: ${pbsout#$pdir/})"
         fi
     else
-        echo "  (run id unknown; see logs/pbs/)"
+        debug "  (run id unknown; see logs/pbs/)"
     fi
     id="$(stage_job_id "$stage")"
     slog="$(latest_stage_log "$pdir" "${STAGE_PREFIX[$stage]}" "$id" || true)"
     if [[ -n "$slog" && -f "$slog" ]]; then
-        echo "  ${slog#$pdir/} (tail):"
+        info "  ${slog#$pdir/} (tail):"
         tail -n 15 "$slog" | sed 's/^/    /'
     fi
     if [[ -n "${STAGE_QCOMMENT[$stage]:-}" ]]; then
@@ -224,18 +225,18 @@ print_project() {
     local pdir="$1"
 
     local name="${F_SYSTEM_NAME:-$(basename "$pdir")}"
-    echo "Project : ${name}"
-    echo "Dir     : ${pdir}"
+    ui_kv "Project" "$name" 8
+    ui_kv "Dir" "$pdir" 8
     if [[ -n "$J_RUN_ID" ]]; then
         if [[ "$J_HAS_JOBS" == "yes" && -n "$J_SUBMITTED_AT" ]]; then
-            echo "Run     : ${J_RUN_ID} (submitted ${J_SUBMITTED_AT})"
+            ui_kv "Run" "${J_RUN_ID} (submitted ${J_SUBMITTED_AT})" 8
         elif [[ "$J_HAS_JOBS" == "yes" ]]; then
-            echo "Run     : ${J_RUN_ID}"
+            ui_kv "Run" "${J_RUN_ID}" 8
         else
-            echo "Run     : ${J_RUN_ID} (not submitted)"
+            ui_kv "Run" "${J_RUN_ID} (not submitted)" 8
         fi
     else
-        echo "Run     : not submitted"
+        ui_kv "Run" "not submitted" 8
     fi
 
     local stage st current
@@ -243,13 +244,13 @@ print_project() {
         local total_dur=""
         total_dur="$(project_total_duration "$pdir" || true)"
         if [[ -n "$total_dur" ]]; then
-            echo "Step    : complete (${STAGE_TOTAL}/${STAGE_TOTAL}), total ${total_dur}"
+            ui_kv "Step" "complete (${STAGE_TOTAL}/${STAGE_TOTAL}), total ${total_dur}" 8
         else
-            echo "Step    : complete (${STAGE_TOTAL}/${STAGE_TOTAL})"
+            ui_kv "Step" "complete (${STAGE_TOTAL}/${STAGE_TOTAL})" 8
         fi
         local mean=""
         mean="$(grep 'Mean dG_bind' "$pdir/results/mmgbsa_summary.md" 2>/dev/null | head -1 || true)"
-        [[ -n "$mean" ]] && echo "Results : results/mmgbsa_summary.md: ${mean}"
+        [[ -n "$mean" ]] && ui_kv "Results" "results/mmgbsa_summary.md: ${mean}" 8
     else
         for current in "${CURRENT_STAGES[@]}"; do
             st="${STAGE_STATE[$current]:-}"
@@ -270,7 +271,7 @@ print_project() {
                 waited="$(queue_wait "$pdir" || true)"
                 [[ -n "$waited" ]] && desc="${desc}, waiting ${waited}"
             fi
-            echo "Step    : ${current} (${idx}/${STAGE_TOTAL}) -- ${desc}"
+            ui_kv "Step" "${current} (${idx}/${STAGE_TOTAL}) -- ${desc}" 8
         done
     fi
 
@@ -280,7 +281,7 @@ print_project() {
             [[ "${STAGE_STATE[$stage]:-}" == "blocked" ]] && blocked_list+=("$stage")
         done
         if (( ${#blocked_list[@]} > 0 )); then
-            echo "Blocked : ${blocked_list[*]}"
+            ui_kv "Blocked" "${blocked_list[*]}" 8
         fi
     fi
 
@@ -299,30 +300,30 @@ print_project() {
             local start=""
             start="$(stage_start_epoch "md" "${STAGE_SLOG[md]:-}" || true)"
             if md_progress "$pdir" "$name" "${start:-0}"; then
-                echo "Progress: ${MD_CHEM} / ${F_MD_TIME_PS} ps (${MD_PCT}%), avg rate ${MD_RATE} ns/day (${MD_RATE_SRC})"
-                [[ -n "${MD_LOG:-}" ]] && echo "Log     : ${MD_LOG}"
+                ui_kv "Progress" "${MD_CHEM} / ${F_MD_TIME_PS} ps (${MD_PCT}%), avg rate ${MD_RATE} ns/day (${MD_RATE_SRC})" 8
+                [[ -n "${MD_LOG:-}" ]] && ui_kv "Log" "${MD_LOG}" 8
                 if [[ -n "$MD_ETA" ]]; then
-                    echo "ETA     : ~$(fmt_duration "$MD_ETA")${left_txt}"
+                    ui_kv "ETA" "~$(fmt_duration "$MD_ETA")${left_txt}" 8
                     if [[ -n "$left" ]] && (( MD_ETA > left )); then
-                        echo "WARNING : ETA exceeds PBS walltime left by $(fmt_duration $((MD_ETA - left))); job will be stopped at the limit (checkpoint kept)."
+                        ui_emit_out WARN "WARNING : ETA exceeds PBS walltime left by $(fmt_duration $((MD_ETA - left))); job will be stopped at the limit (checkpoint kept)."
                     fi
                 else
-                    echo "ETA     : unknown (engine log has no ns/day rate)${left_txt}"
+                    ui_kv "ETA" "unknown (engine log has no ns/day rate)${left_txt}" 8
                 fi
             else
-                [[ -n "${MD_LOG:-}" ]] && echo "Log     : ${MD_LOG}"
+                [[ -n "${MD_LOG:-}" ]] && ui_kv "Log" "${MD_LOG}" 8
                 if [[ -n "${MD_LOG:-}" ]]; then
-                    echo "ETA     : unknown (engine log found but no progress yet)${left_txt}"
+                    ui_kv "ETA" "unknown (engine log found but no progress yet)${left_txt}" 8
                 else
-                    echo "ETA     : unknown (engine log not found yet)${left_txt}"
+                    ui_kv "ETA" "unknown (engine log not found yet)${left_txt}" 8
                 fi
             fi
         else
-            echo "ETA     : unknown for this stage (no progress metric)${left_txt}"
+            ui_kv "ETA" "unknown for this stage (no progress metric)${left_txt}" 8
             if [[ "$current" == "analysis" ]]; then
                 local phase=""
                 phase="$(analysis_phase "$pdir" "$id" || true)"
-                [[ -n "$phase" ]] && echo "Phase   : ${phase}"
+                [[ -n "$phase" ]] && ui_kv "Phase" "${phase}" 8
             fi
         fi
         eta_printed=yes
@@ -339,9 +340,9 @@ print_project() {
                     [[ -n "$left" ]] && left_txt=" (PBS walltime left $(fmt_duration "$left"))"
                     local est="${STAGE_QEST[$current]:-}"
                     if [[ "$st" == "queued" && -n "$est" && "$est" != "null" ]]; then
-                        echo "ETA     : unknown while queued (estimated start ${est})${left_txt}"
+                        ui_kv "ETA" "unknown while queued (estimated start ${est})${left_txt}" 8
                     else
-                        echo "ETA     : unknown while ${st}${left_txt}"
+                        ui_kv "ETA" "unknown while ${st}${left_txt}" 8
                     fi
                     break
                     ;;

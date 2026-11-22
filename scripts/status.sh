@@ -2,7 +2,7 @@
 # Project-centric status: current stage, ETA, and warnings/errors from the
 # current run. This intentionally does not print the full PBS queue or
 # node/GPU tables; use qstat/pbsnodes for that.
-# Usage: status.sh [--all] [SYSTEM_NAME | PROJECT_DIR]
+# Usage: status.sh [--all] [--color MODE] [SYSTEM_NAME | PROJECT_DIR]
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,9 +93,14 @@ source "${PIPELINE_ROOT}/scripts/lib/status_state.sh"
 source "${PIPELINE_ROOT}/scripts/lib/status_report.sh"
 source "${PIPELINE_ROOT}/scripts/lib/status_reported.sh"
 
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
 status_usage() {
     cat <<'EOF'
-Usage: status.sh [--all] [SYSTEM_NAME | PROJECT_DIR]
+Usage: status.sh [--all] [--color MODE] [SYSTEM_NAME | PROJECT_DIR]
+
+  --color MODE      auto (default), always, or never.
 
 For each initialized project, show:
   - the current stage and its PBS state,
@@ -145,7 +150,7 @@ main() {
     fi
 
     if ! command -v "$QSTAT" >/dev/null 2>&1; then
-        printf 'Note: qstat not found (QSTAT=%s); showing file-based status only.\n' "$QSTAT"
+        debug "$(printf 'Note: qstat not found (QSTAT=%s); showing file-based status only.' "$QSTAT")"
         echo
     fi
 
@@ -157,7 +162,7 @@ main() {
             exit 1
         fi
         printf 'No initialized projects under %s/projects\n' "$SCH_WORK_ROOT"
-        printf 'Run init_user.sh in your work directory, or export SCH_WORK_ROOT=<root> and retry.\n'
+        next_steps failed "Run init_user.sh in your work directory, or export SCH_WORK_ROOT=<root> and retry."
         exit 0
     fi
     mapfile -t PROJECTS < <(printf '%s\n' "${PROJECTS[@]}" | LC_ALL=C sort)

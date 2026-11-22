@@ -171,6 +171,8 @@ run_status() {
         SCH_WORK_ROOT="$work" QSTAT="$SANDBOX/bin/qstat" \
         QSTAT_FIXTURE_DIR="$SANDBOX/qstat" QSTAT_LOG="$QSTAT_LOG" \
         PBSNODES="$SANDBOX/bin/pbsnodes" SCHRODINGER="$SANDBOX/no-schrodinger" \
+        SCH_SCRATCH_DIR="${SCH_SCRATCH_DIR:-}" \
+        SCHRODINGER_TMPDIR="${SCHRODINGER_TMPDIR:-}" \
         STATUS_NOW="${STATUS_NOW:-$(date +%s)}" \
         bash "$REPO_ROOT/scripts/status.sh" "$@"
 }
@@ -183,6 +185,8 @@ run_status_no_qstat() {
         SCH_WORK_ROOT="$work" QSTAT="$SANDBOX/missing-qstat" \
         QSTAT_FIXTURE_DIR="$SANDBOX/qstat" PBSNODES="$SANDBOX/bin/pbsnodes" \
         SCHRODINGER="$SANDBOX/no-schrodinger" \
+        SCH_SCRATCH_DIR="${SCH_SCRATCH_DIR:-}" \
+        SCHRODINGER_TMPDIR="${SCHRODINGER_TMPDIR:-}" \
         STATUS_NOW="${STATUS_NOW:-$(date +%s)}" \
         bash "$REPO_ROOT/scripts/status.sh" "$@"
 }

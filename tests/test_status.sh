@@ -113,6 +113,42 @@ assert_contains "$out" "ETA     : ~" "scratch MD ETA"
 assert_not_contains "$out" "pscratch_2" "prefixed system not used"
 
 # ---------------------------------------------------------------------------
+# The same engine log is found through SCH_SCRATCH_DIR and SCHRODINGER_TMPDIR.
+# ---------------------------------------------------------------------------
+reset_status_state
+worksr="$SANDBOX/work-scratch-root"
+psr="$worksr/projects/psroot"
+make_project "$psr" psroot
+write_jobs_env "$psr" run1 "$submitted"
+write_done "$psr" prepwizard 991 run1 "$submitted" "$(ts $((now - 7000)))"
+write_done "$psr" setup 991 run1 "$submitted" "$(ts $((now - 7000)))"
+write_done "$psr" min 994 run1 "$submitted" "$(ts $((now - 7000)))"
+site_scratch="$SANDBOX/site-scratch"
+mkdir -p "$site_scratch/desmond_md_job_psroot"
+for i in 1 2 3 4 5; do
+    printf 'Chemical time: %s ps, Step: %s, ns/day: 250.1\n' \
+        "$((i * 86))" "$((i * 100))" >> "$site_scratch/desmond_md_job_psroot/desmond_md_job_psroot.log"
+done
+write_qstat_fixture "$SANDBOX/qstat" 995 R \
+    "resources_used.walltime = 02:14:00" \
+    "Resource_List.walltime = 96:00:00" \
+    "start_time = $(ts_qstat $((now - 8040)))"
+
+out="$(SCH_SCRATCH_DIR="$site_scratch" run_status "$worksr" psroot)"
+assert_contains "$out" "Progress: 430 / 300000.0 ps (0.1%), avg rate 250.1 ns/day (avg10)" \
+    "SCH_SCRATCH_DIR progress"
+assert_contains "$out" "Log     : $site_scratch/desmond_md_job_psroot/desmond_md_job_psroot.log" \
+    "SCH_SCRATCH_DIR log path"
+assert_contains "$out" "ETA     : ~" "SCH_SCRATCH_DIR ETA"
+
+out="$(SCHRODINGER_TMPDIR="$site_scratch" run_status "$worksr" psroot)"
+assert_contains "$out" "Log     : $site_scratch/desmond_md_job_psroot/desmond_md_job_psroot.log" \
+    "SCHRODINGER_TMPDIR log path"
+
+colored="$(run_status "$worksr" psroot --color=always)"
+assert_contains "$colored" $'\033[' "status --color=always colors output"
+
+# ---------------------------------------------------------------------------
 # Failed min: FAILED line, blocked downstream, PBS/stage-log tail.
 # ---------------------------------------------------------------------------
 reset_status_state

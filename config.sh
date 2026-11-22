@@ -80,6 +80,15 @@ fi
 GPU_LOCK_DIR="${GPU_LOCK_DIR%/}"
 export GPU_LOCK_DIR
 
+# Shared scratch root used to find live Desmond engine logs while MD runs.
+# The directory must be shared and writable from the login and compute nodes.
+# An explicit SCHRODINGER_TMPDIR (set by the site) always wins where the job
+# actually writes; this variable only widens the status lookup and supplies a
+# default when SCHRODINGER_TMPDIR is unset.
+SCH_SCRATCH_DIR="${SCH_SCRATCH_DIR:-/home/sch/tmp/${USER:-$(id -un 2>/dev/null || printf user)}}"
+SCH_SCRATCH_DIR="${SCH_SCRATCH_DIR%/}"
+export SCH_SCRATCH_DIR
+
 # ---------------- Machine / scheduler ----------------
 SCHRODINGER="${SCHRODINGER:-/opt/schrodinger2021-2}"
 SCHRODINGER_LICENSE_FILE="${SCHRODINGER_LICENSE_FILE:-}"

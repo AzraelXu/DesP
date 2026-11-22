@@ -8,6 +8,10 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PIPELINE_ROOT
 source "${PIPELINE_ROOT}/scripts/lib/common.sh"
 source "${PIPELINE_ROOT}/config.sh"
+
+ui_parse_color_args "$@" || exit $?
+set -- "${UI_ARGS[@]+"${UI_ARGS[@]}"}"
+
 setup_schrodinger_env
 require_command "$QSUB"
 
@@ -45,14 +49,13 @@ check_ascii "$OUT"
 check_bash_syntax "$OUT"
 
 log INFO "submitting GPU smoke test: ${OUT}"
-qsub_out="$("$QSUB" "$OUT" 2>&1)" || die "qsub failed: ${qsub_out}"
+qsub_out="$(SCH_COLOR=never "$QSUB" "$OUT" 2>&1)" || die "qsub failed: ${qsub_out}"
 qsub_out="$(printf '%s' "$qsub_out" | tr -d '\r')"
 job_id="$(printf '%s\n' "$qsub_out" | awk 'NF{print $NF}' | tail -1)"
 [[ "$job_id" =~ ^[0-9]+(\.[A-Za-z0-9._-]+)?$ ]] || die "unexpected qsub output: ${qsub_out}"
 
 echo
 echo "GPU smoke test submitted: ${job_id}"
-echo "PBS script : ${OUT}"
-echo "PBS stdout : ${PBS_OUT}"
-echo "Monitor    : $QSTAT -f ${job_id}"
-echo "Cancel     : $QDEL ${job_id}"
+ui_kv "PBS script" "$OUT" 11
+ui_kv "PBS stdout" "$PBS_OUT" 11
+next_steps ok "Monitor: $QSTAT -f ${job_id}" "Cancel: $QDEL ${job_id}"

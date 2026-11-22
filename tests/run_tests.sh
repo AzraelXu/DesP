@@ -9,9 +9,12 @@ fail=0
 
 echo "== Syntax checks =="
 for f in config.sh scripts/lib/common.sh scripts/lib/bashrc.sh \
+         scripts/lib/ui.sh scripts/lib/project_resolve.sh \
          scripts/lib/status_state.sh scripts/lib/status_report.sh \
          scripts/lib/status_reported.sh \
-         scripts/init_user.sh scripts/status.sh scripts/generate_systems.sh \
+         scripts/init_user.sh scripts/check_env.sh scripts/submit_smoke.sh \
+         scripts/submit_system.sh scripts/submit_batch.sh \
+         scripts/status.sh scripts/collect_results.sh scripts/generate_systems.sh \
          tests/fixtures/fake_schrodinger/run; do
     if bash -n "$f"; then
         printf '  OK   %s\n' "$f"
@@ -25,6 +28,7 @@ echo
 if command -v python3 >/dev/null 2>&1; then
     echo "== Python syntax checks =="
     if python3 -c 'import ast,sys; [ast.parse(open(p, encoding="utf-8").read(), filename=p) for p in sys.argv[1:]]' \
+            scripts/sch_ui.py \
             scripts/generate_systems.py scripts/system_generation.py \
             scripts/inspect_structure.py tests/fixtures/make_structure_report.py; then
         printf '  OK   python scripts\n'
